@@ -1,4 +1,6 @@
-\# Run ollama qwen:4b on a mac locally
+# How to run Ollama QWEN locally on your mac to generate Databricks Pipelines
+
+## Run ollama qwen:4b on a mac locally
 1. brew install --cask docker
 1. brew install docker-compose
 1. brew install --cask docker-desktop
@@ -13,6 +15,7 @@
 1. user query: the csv file name is patients.csv. it has the following columns: patient_id, first_name, last_name, sex, favorite_movie.
 
 
+## Agentic AI agent responds with:
 ```
 user query: the csv file name is patients.csv. it has the following columns: patient_id, first_name, last_name, sex, favorite_movie.
 bot response:
@@ -84,4 +87,14 @@ The code will:
 4. Write to silver table named `silver_patients` with Delta Lake clustering
 
 Note: The `common.readstream` function is assumed to be properly implemented in your project based on the PRD specifications. The `catalog` and `schema` variables are populated from your notebook parameters.
+```
+
+## System Instructions
+The QWEN model is where the magic happens, here is the pixie dust that makes it code out the PRD.
+```
+# Step 3: Create `Assistant` agent, which is capable of using tools and reading files.
+system_instruction = '''User's request will contain one or more CSV files with column names.
+After receiving the user's request, you should:
+- select one or more operation from the given document to generate a pipeline.
+- finally, save the pyspark (python) code.'''
 ```
