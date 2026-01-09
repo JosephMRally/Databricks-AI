@@ -1,4 +1,4 @@
-# How to run Ollama QWEN locally on your mac to generate Databricks Pipelines
+# How to use Agentic AI to turn PRDs into Databricks Pipelines
 
 ## Run ollama qwen:4b on a mac locally
 1. brew install --cask docker
