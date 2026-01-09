@@ -10,9 +10,10 @@
 1. docker compose down; docker compose up -d
 1. Watch docker logs, takes about 1hr to exec ollama_entrypoint.sh on 1st run
 1. python ollama_agentic_ai.py (on your local terminal)
+1. user query: the csv file name is patients.csv. it has the following columns: patient_id, first_name, last_name, sex, favorite_movie.
+
 
 ```
-
 user query: the csv file name is patients.csv. it has the following columns: patient_id, first_name, last_name, sex, favorite_movie.
 bot response:
 /Users/large/Documents/code/Databricks-AI/read_prd_and_code_a_pipeline/venv/lib/python3.13/site-packages/jieba/_compat.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
@@ -27,7 +28,7 @@ bot response:
 [ANSWER]
 Here's the Python code for your use case following the specifications in the PRD:
 
-\`\`\`python
+``` `` ```python
 import pyspark.sql.functions as F
 from pyspark.sql import Window
 from delta import DeltaTable
@@ -66,7 +67,7 @@ for col in pii_columns:
 
 # Step 4: Save to silver table
 bronze_patients.write.option("clusterBy.auto", "true").saveAsTable(f"silver_{csv_filename}")
-\`\`\`
+``` `` ```
 
 Key features of this implementation:
 1. Properly handles the PII columns (`patient_id`, `first_name`, `last_name`) as specified
