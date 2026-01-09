@@ -4,7 +4,7 @@
 1. brew install docker
 1. brew install docker-compose
 1. brew install docker-desktop
-1. run docker-desktop
+1. run `docker-desktop.app` using Finder, complete installation
 1. python3 -m venv venv
 1. source venv/bin/activate
 1. pip install --upgrade pip
