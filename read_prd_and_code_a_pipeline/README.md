@@ -1,9 +1,9 @@
 # How to use Agentic AI to turn PRDs into Databricks Pipelines
 
 ## Run ollama qwen:4b on a mac locally
-1. brew install --cask docker
+1. brew install docker
 1. brew install docker-compose
-1. brew install --cask docker-desktop
+1. brew install docker-desktop
 1. run docker-desktop
 1. python3 -m venv venv
 1. source venv/bin/activate
