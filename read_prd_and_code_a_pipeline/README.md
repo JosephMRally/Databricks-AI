@@ -10,7 +10,7 @@
 1. pip install --upgrade pip
 1. pip install -r ollama_requirements.txt
 1. docker compose down; docker compose up -d
-1. Watch docker logs, takes about 1hr to exec ollama_entrypoint.sh on 1st run
+1. Watch docker logs, takes about 1hr to download model on 1st run
 1. python ollama_agentic_ai.py (on your local terminal)
 1. user query: the csv file name is patients.csv. it has the following columns: patient_id, first_name, last_name, sex, favorite_movie.
 
