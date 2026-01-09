@@ -1,0 +1,23 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_4_pipelines
+    deploy:
+      resources:
+        limits:
+          memory: 8GB
+        reservations:
+          memory: 4GB
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./ollama_entrypoint.sh:/entrypoint.sh
+      - ./ollama_requirements.txt:/requirements.sh
+      - ./ollama_agentic_ai.txt:/agentic_ai.sh
+    pull_policy: always
+    tty: true
+    restart: always
+    entrypoint: ["/usr/bin/bash", "/entrypoint.sh"]
+volumes:
+  ollama_data:
