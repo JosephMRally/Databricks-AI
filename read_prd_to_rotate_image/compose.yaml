@@ -1,29 +1,4 @@
 services:
-  wordpress:
-    image: wordpress:latest
-    ports:
-      - 8080:80
-    restart: always
-    environment:
-      - WORDPRESS_DB_HOST=db
-      - WORDPRESS_DB_USER=wordpress
-      - WORDPRESS_DB_PASSWORD=wordpress
-      - WORDPRESS_DB_NAME=wordpress
-    volumes:
-      - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
-
-  deepface:
-    image: serengil/deepface:latest
-    container_name: deepface_container
-    platform: "linux/amd64"  # Specify the desired platform
-    ports:
-      - "5005:5000" # Exposes the API port (5000 inside the container) to port 5005 on your host
-    environment:
-      # Optional: You can set environment variables here if needed
-      # For example, to disable GPU usage if you don't have one:
-      - CUDA_VISIBLE_DEVICES=-1 
-    restart: unless-stopped
-
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -44,24 +19,5 @@ services:
     tty: true
     restart: always
     entrypoint: ["/usr/bin/bash", "/entrypoint.sh"]
-
-  db:
-    # We use a mariadb image which supports both amd64 & arm64 architecture
-    image: mariadb:10.6.4-focal
-    # If you really want to use MySQL, uncomment the following line
-    #image: mysql:8.0.27
-    command: '--default-authentication-plugin=mysql_native_password'
-    volumes:
-      - db_data:/var/lib/mysql
-    restart: always
-    environment:
-      - MYSQL_ROOT_PASSWORD=somewordpress
-      - MYSQL_DATABASE=wordpress
-      - MYSQL_USER=wordpress
-      - MYSQL_PASSWORD=wordpress
-    expose:
-      - 3306
-      - 33060
 volumes:
-  db_data:
   ollama_data:
