@@ -3,6 +3,7 @@
 Read the article here: https://medium.com/@ultrarelativistic/turn-prds-into-databricks-pyspark-pipelines-with-agentic-ai-using-docker-ollama-and-qwen3-4b-6be6413539b1
 
 ## Run ollama qwen:4b on a mac locally using Docker
+This method runs on CPU only and hence takes a while to run.
 1. brew install docker
 1. brew install docker-compose
 1. brew install docker-desktop
@@ -14,9 +15,10 @@ Read the article here: https://medium.com/@ultrarelativistic/turn-prds-into-data
 1. pip install --upgrade pip
 1. pip install -r ollama_requirements.txt
 1. docker compose down; docker compose up -d
-1. Watch docker logs, takes about 1hr to download model on 1st run
+1. Watch docker logs, takes about 1hr to download the model on 1st run
 1. python ollama_agentic_ai.py (on your local terminal)
 1. user query: the csv file name is patients.csv. it has the following columns: patient_id, first_name, last_name, sex, favorite_movie.
+1. wait 10-15 minutes on a slow Mac
 
 
 ## Agentic AI agent responds with:
