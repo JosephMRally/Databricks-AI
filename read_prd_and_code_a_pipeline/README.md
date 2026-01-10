@@ -6,7 +6,7 @@
 1. brew install docker-desktop
 1. run `docker-desktop.app` using Finder, complete installation
 1. git clone https://github.com/JosephMRally/Databricks-AI.git
-1. cd Databricks-AI
+1. cd Databricks-AI/read_prd_and_code_a_pipeline
 1. python3 -m venv venv
 1. source venv/bin/activate
 1. pip install --upgrade pip
