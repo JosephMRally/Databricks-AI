@@ -1,0 +1,47 @@
+{
+  "nextPageToken": "MOCK_PAGE_2",
+  "resultCountEstimate": "201",
+  "threads": [
+    {
+      "id": "t_alice",
+      "messages": [
+        {"date": "2018-03-01T09:00:00Z", "id": "16210d3a0000a001", "labelIds": ["INBOX"],
+         "sender": "alice@example.com", "toRecipients": ["owner@example.com"]},
+        {"date": "2019-07-15T22:58:53Z", "id": "16bf2a1b0000a002", "labelIds": ["SENT"],
+         "sender": "owner@example.com", "toRecipients": ["alice@example.com"]}
+      ]
+    },
+    {
+      "id": "t_bob_cc",
+      "messages": [
+        {"date": "2017-01-10T12:00:00Z", "id": "159a0b0c0000b001", "labelIds": ["SENT"],
+         "sender": "owner@example.com", "toRecipients": ["someone@example.net"],
+         "ccRecipients": ["bob@example.com"]},
+        {"date": "2020-11-20T08:30:00Z", "id": "175e9f7d0000b002", "labelIds": ["INBOX"],
+         "sender": "bob@example.com", "toRecipients": ["owner@example.com"]}
+      ]
+    },
+    {
+      "id": "t_bcc",
+      "messages": [
+        {"date": "2016-05-05T05:05:05Z", "id": "1549b2340000c001", "labelIds": ["SENT"],
+         "sender": "carol@example.net", "toRecipients": ["owner@example.com"],
+         "bccRecipients": ["dave@example.net"]}
+      ]
+    },
+    {
+      "id": "t_starred",
+      "messages": [
+        {"date": "2015-01-01T00:00:00Z", "id": "14ad9b100000d001", "labelIds": ["INBOX", "STARRED"],
+         "sender": "eve@example.net", "toRecipients": ["owner@example.com"]}
+      ]
+    },
+    {
+      "id": "t_display",
+      "messages": [
+        {"date": "2016-06-06T06:06:06Z", "id": "1552d6700000e001", "labelIds": ["INBOX"],
+         "sender": "Grace Hopper <grace@example.org>", "toRecipients": ["owner@example.com"]}
+      ]
+    }
+  ]
+}
