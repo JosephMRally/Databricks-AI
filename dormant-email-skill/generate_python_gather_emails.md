@@ -1,0 +1,43 @@
+# Generate python script
+## Function
+Create a python script called `scripts/gather_emails.py`; do not execute! The script should be a Facade over the `simplegmail` library that hides the Gmail API behind one simple call. Running the script once does a single sweep over the whole mailbox: for every message, it records the raw From, To, Cc, and Bcc values as-is, together with the message's date. The script owns the entire sweep, so the agent never pages the mailbox or holds raw messages in context.
+
+
+## User Stories
+Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `<actor>|<requirement>|<description>`. User stories form the basis of tests and code.
+
+<actor> | <requirement> | <description>
+engineer | tests to mock the `simplegmail` Gmail client | all tests are deterministic and reproducible
+engineer | test fixtures modeled on the shape of real `simplegmail` `Message` objects, using fake addresses | tests are realistic yet deterministic and touch no real account
+human | to know all email address values per message per thread | a full summary of an email thread's start and end can be understood
+human | dates converted to UTC YYYY-MM-DD from the simplegmail date string (ISO-8601 with tz offset, or the raw RFC 2822 header when simplegmail could not parse it); an unparseable date yields an empty cell | date processing is simplified and the date column stays well-typed
+human | read `sender`, `recipient`, `cc`, and `bcc` off each `simplegmail` `Message` | every From/To/Cc/Bcc value is captured
+engineer | the output to be streamed to a single CSV file | the file itself could be larger than the amount of memory we have
+engineer | the array columns (`emails`, `label_ids`) in the output CSV to be `|`-delimited | arrays of strings can be split apart in the next phase
+engineer | use [`simplegmail`](https://github.com/JosephMRally/simplegmail/tree/pagination) (it is already installed) to connect to Gmail | it wraps the Gmail API and speeds up development
+human | a clear error message and non-zero exit code when neither the saved token (`~/gmail-token.json`) nor the OAuth client (`~/client_secret.json`) exists | so that the user understands why authentication cannot proceed and how to fix it
+agent | python args and exit codes are used | so that LLM harness executing the code knows the status
+engineer | pass both `~/gmail-token.json` (creds_file) and `~/client_secret.json` (client_secret_file) to the Gmail constructor; a valid saved token is reused | so that signing in isnt necessary a second time
+engineer | include a flag for logging | so that i can see messages are being processed for testing
+human | treat `sender`/`recipient` as strings and `cc`/`bcc` as lists of strings (any may be empty/None), carrying every value as-is — no parsing, validation, normalization, or dedup | this phase is the Extract of an ELT: the address fields stay 1:1 with the source and transformations happen in later phases (dates are the one exception, per the story above)
+engineer | exactly one row per message, even when all address fields are empty | every source message is represented 1:1 in the extract
+
+## Input
+Phase 1 reads the mailbox through the `simplegmail` library, which wraps the Gmail API — there is no MCP connector involved. Authentication is Google OAuth: use the `~/client_secret.json` (an OAuth client from the Google Cloud Console) in the constructor.  The first run opens a browser to authorize and writes `~/gmail-token.json` for reuse, and IMAP must be enabled on the account. Because the first run needs a browser, provision `~/gmail-token.json` in an environment that has one — the script cannot authenticate headless on a cold start.
+
+When running the sweep, pass `--verbose` to watch messages being processed (logging is off by default).
+
+
+## Output
+The output should be streamed to a single CSV — exactly one row per message, 1:1 with the source (a message with no addresses still yields a row with an empty `emails` cell):
+name, type, format (optional)
+`date`, date, `YYYY-MM-DD`
+`thread_id`, str
+`message_id`, str
+`emails`, array<str> (joined with `|`) — the raw `sender`, `recipient`, `cc`, `bcc` values as-is, in that order with empty fields omitted (position does not identify which field a value came from)
+`label_ids`, array<str> (joined with `|`)
+
+Known limitation: `|` is technically legal inside an RFC 5322 address local part and would corrupt the `|`-join, but Gmail addresses cannot contain `|` — accepted for this tool.
+
+# Finally
+Follow strict TDD (see `generate_SKILL.md` and `CLAUDE.md`): write the tests derived from the user stories first and run them to show they fail (red) **before** changing any implementation; then implement until green and report both runs. Every user story must map to at least one test that was observed failing first. Commit after green.
