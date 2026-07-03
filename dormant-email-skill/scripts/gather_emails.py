@@ -203,10 +203,13 @@ def main(argv=None):
 
     # Story: a logging flag shows messages being processed (for testing).
     # Logs go to stderr so stdout stays reserved for the final status line.
+    # force=True: basicConfig is otherwise a no-op when root already has
+    # handlers, which would make -v dead on any invocation after the first.
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(levelname)s %(message)s",
         stream=sys.stderr,
+        force=True,
     )
 
     client_secret = args.client_secret or DEFAULT_CLIENT_SECRET

@@ -168,6 +168,18 @@ def test_sweep_emits_a_row_even_with_no_addresses_or_date(tmp_path):
     assert rows[1] == ["", "t2", "m2", "", ""]
 
 
+def test_sweep_omits_empty_fields_from_emails_join(tmp_path):
+    # spec: "in that order with empty fields omitted" — no empty elements like
+    # "a@x.com||c@x.com" when recipient/bcc are empty
+    m = message("m4", "t4", "2020-01-01T00:00:00Z",
+                sender="a@x.com", recipient="", cc=["c@x.com"], bcc=[])
+    out = tmp_path / "occurrences.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][3] == "a@x.com|c@x.com"
+
+
 def test_sweep_carries_multi_address_string_as_one_value(tmp_path):
     # a To header holding several comma-separated addresses stays ONE array
     # element — splitting it is the next phase's job
@@ -337,6 +349,29 @@ def test_main_passes_page_size_to_sweep(tmp_path, monkeypatch):
                "--page-size", "42"])
     assert rc == 0
     assert seen["page_size"] == 42
+
+
+def test_main_verbose_flag_sets_info_level(tmp_path, monkeypatch):
+    # Story: "include a flag for logging" — the -v FLAG itself must enable the
+    # INFO progress lines, even when main() has been invoked before (a plain
+    # run followed by a -v run must not leave logging stuck at WARNING).
+    cs = tmp_path / "credentials.json"
+    cs.write_text("{}")
+
+    class FakeFacade:
+        def sweep(self, out_csv, page_size=None):
+            with open(out_csv, "w", encoding="utf-8") as fh:
+                fh.write(",".join(CSV_HEADER) + "\n")
+            return 0
+
+    monkeypatch.setattr(
+        MailboxSweepFacade, "from_simplegmail",
+        classmethod(lambda cls, client_secret=None, token=None: FakeFacade()),
+    )
+
+    main(["--out", str(tmp_path / "a.csv"), "--client-secret", str(cs)])
+    main(["--out", str(tmp_path / "b.csv"), "--client-secret", str(cs), "-v"])
+    assert logging.getLogger("gather_emails").getEffectiveLevel() == logging.INFO
 
 
 def test_main_reuses_saved_token_without_client_secret(tmp_path, monkeypatch):
