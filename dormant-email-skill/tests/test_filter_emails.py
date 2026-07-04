@@ -317,6 +317,29 @@ def test_build_state_lowercases_and_merges_csv_addresses():
     assert state["alice@x.com"][2] == ["t1", "t2"]
 
 
+# --- ordering: latest_date DESC, ties by email A->Z, in both files ------------
+
+def test_main_outputs_ordered_by_latest_date_desc_then_email(tmp_path):
+    # input arrives in neither order; zeta and alpha tie on latest_date
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2012-05-05", "zeta@x.com", "m1"),
+        arow("t2", "2010-01-01", "2015-02-02", "beta@y.com", "m2"),
+        arow("t3", "2010-01-01", "2012-05-05", "alpha@z.com", "m3"),
+    ])
+    out = tmp_path / "filtered.csv"
+
+    main(["--in", str(inp), "--out", str(out),
+          "--ignore", "", "--retain", "", "--years", "5",
+          "--today", "2026-07-04"])
+
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert [r[0] for r in rows[1:]] == ["beta@y.com", "alpha@z.com", "zeta@x.com"]
+    queries = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
+    assert queries == "beta@y.com OR alpha@z.com OR zeta@x.com\n"
+
+
 # --- Gmail search queries file: " OR "-joined, 30 addresses per line ----------
 
 def test_format_queries_chunks_30_addresses_per_line():

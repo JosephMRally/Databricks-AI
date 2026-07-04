@@ -118,6 +118,10 @@ def select_dormant(state, cutoff, exclude):
     Dormant is strict: last seen older than ``cutoff`` (a ``date``); an
     address last seen on the cutoff day itself is kept off the list.
     ``exclude`` holds exact addresses and/or bare domains (see ``_excluded``).
+
+    The result is ordered by last seen DESC with ties broken by email A->Z,
+    so both output files (CSV and Gmail queries) inherit the order: the most
+    recently seen — borderline — contacts come first.
     """
     result = {}
     for email, entry in state.items():
@@ -125,7 +129,9 @@ def select_dormant(state, cutoff, exclude):
             continue
         if date.fromisoformat(entry[1]) < cutoff:
             result[email] = entry
-    return result
+    ordered = sorted(result.items(), key=lambda kv: kv[0])
+    ordered.sort(key=lambda kv: kv[1][1], reverse=True)  # stable: email ASC kept
+    return dict(ordered)
 
 
 def format_queries(emails, per_line=ADDRESSES_PER_QUERY_LINE):

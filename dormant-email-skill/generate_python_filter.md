@@ -23,6 +23,8 @@ engineer | test fixtures use fake addresses, and prompts are driven through CLI 
 human | to enter a bare domain (e.g. wm.com) in the ignore or retain inputs, matching every address at that domain or its subdomains | so I do not have to enter every address from that domain one by one
 engineer | all email addresses and domains handled case-insensitively: every address or domain — from the input CSV or the ignore/retain inputs — is converted to lower case before any comparison | `Billing@WM.com` and `billing@wm.com` are the same sender, so matching never misses on capitalization
 human | alongside the CSV, a text file of the delete-list addresses joined by " OR ", 30 addresses per line, each line a standalone Gmail search query, defaulting to `filtered_queries.txt` (overridable via `--queries-out`) | so I can paste a line into Gmail's search UI and review many dormant senders' mail at once
+human | both output files ordered by `latest_date` DESC, ties broken by `email` A→Z | the most recently seen dormant contacts — the borderline calls — are at the top, and the order is deterministic
+
 
 ## Function
 Create a python script called `scripts/filter_emails.py`; do not execute! It is the final **Filter phase of the ELT pipeline**: it turns the aggregate's per-thread CSV into a per-address **delete list**, filtering out every address that should not be deleted — the owner, ignored and retained addresses, and anyone heard from since the cutoff. The user stories above define its behavior.
