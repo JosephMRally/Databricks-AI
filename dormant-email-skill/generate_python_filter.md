@@ -20,7 +20,8 @@ human | first-seen and last-seen dates on every delete-list row | I can review h
 engineer | the output written to a single CSV defaulting to `filtered_results.csv` (overridable via `--out`), with the input path defaulting to the aggregate's default output filename (overridable via `--in`) | the pipeline runs with no args while tests point at fixtures
 engineer | the array columns (`thread_ids`, `message_ids`) in the output CSV to be `|`-delimited | consistent with the rest of the pipeline
 engineer | test fixtures use fake addresses, and prompts are driven through CLI args or fed stdin in tests | tests are deterministic and touch no real account or terminal
-
+human | to enter a bare domain (e.g. wm.com) in the ignore or retain inputs, matching every address at that domain or its subdomains | so I do not have to enter every address from that domain one by one
+engineer | all email addresses and domains handled case-insensitively: every address or domain — from the input CSV or the ignore/retain inputs — is converted to lower case before any comparison | `Billing@WM.com` and `billing@wm.com` are the same sender, so matching never misses on capitalization
 
 ## Function
 Create a python script called `scripts/filter_emails.py`; do not execute! It is the final **Filter phase of the ELT pipeline**: it turns the aggregate's per-thread CSV into a per-address **delete list**, filtering out every address that should not be deleted — the owner, ignored and retained addresses, and anyone heard from since the cutoff. The user stories above define its behavior.

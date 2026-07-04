@@ -11,7 +11,10 @@ them since?".
 
 An address lands on the delete list only when its last-seen date is strictly
 older than the cutoff (today − N years) and it is neither ignored nor
-retained. The ignore prompt defaults to the inferred account owner — the
+retained. Ignore/retain entries are exact addresses or bare domains (e.g.
+``wm.com``, covering the domain and its subdomains), and every address and
+entry is lowercased before comparison, whatever case the CSV or the user
+supplies. The ignore prompt defaults to the inferred account owner — the
 address appearing in the most threads, since the owner is on essentially
 every thread of their own mailbox. Each prompt is skipped when the matching
 CLI arg (--ignore / --retain / --years) is given, and --today pins the clock
@@ -53,6 +56,9 @@ def build_address_state(rows):
         for email in (r.get("emails") or "").split(ARRAY_DELIMITER):
             if not email:
                 continue
+            # the aggregate emits lowercase, but don't trust a hand-edited
+            # CSV: everything is compared lowercase
+            email = email.lower()
             entry = state.setdefault(email, [earliest, latest, [], []])
             entry[0] = min(entry[0], earliest)
             entry[1] = max(entry[1], latest)
@@ -82,15 +88,32 @@ def years_before(day, n):
         return day.replace(year=day.year - n, day=28)
 
 
+def _excluded(email, exclude):
+    """True when ``email`` is covered by an exclude entry (all lowercase).
+
+    An entry with an ``@`` is an exact address; a bare entry (e.g. ``wm.com``)
+    is a domain and covers the address's domain and its subdomains — matched
+    after the ``@`` only, never against a look-alike local part.
+    """
+    if email in exclude:
+        return True
+    domain = email.rsplit("@", 1)[-1]
+    return any(
+        "@" not in entry and (domain == entry or domain.endswith("." + entry))
+        for entry in exclude
+    )
+
+
 def select_dormant(state, cutoff, exclude):
     """The delete list: state filtered to dormant, non-excluded addresses.
 
     Dormant is strict: last seen older than ``cutoff`` (a ``date``); an
     address last seen on the cutoff day itself is kept off the list.
+    ``exclude`` holds exact addresses and/or bare domains (see ``_excluded``).
     """
     result = {}
     for email, entry in state.items():
-        if email in exclude:
+        if _excluded(email, exclude):
             continue
         if date.fromisoformat(entry[1]) < cutoff:
             result[email] = entry
@@ -98,7 +121,8 @@ def select_dormant(state, cutoff, exclude):
 
 
 def _parse_addresses(text):
-    """Comma-separated addresses -> stripped, lowercased, empties dropped."""
+    """Comma-separated addresses or bare domains -> stripped, lowercased,
+    empties dropped."""
     return [a.strip().lower() for a in (text or "").split(",") if a.strip()]
 
 
@@ -112,10 +136,12 @@ def main(argv=None):
     parser.add_argument("--out", default=DEFAULT_OUT,
                         help=f"output delete-list CSV (default: {DEFAULT_OUT})")
     parser.add_argument("--ignore", default=None,
-                        help="comma-separated addresses to ignore; skips the "
-                             "prompt (prompt default: the inferred owner)")
+                        help="comma-separated addresses or bare domains to "
+                             "ignore; skips the prompt (prompt default: the "
+                             "inferred owner)")
     parser.add_argument("--retain", default=None,
-                        help="comma-separated addresses to retain; skips the prompt")
+                        help="comma-separated addresses or bare domains to "
+                             "retain; skips the prompt")
     parser.add_argument("--years", type=int, default=None,
                         help=f"dormancy cutoff in years; skips the prompt "
                              f"(default: {DEFAULT_YEARS})")

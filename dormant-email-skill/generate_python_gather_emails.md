@@ -4,7 +4,7 @@ Create a python script called `scripts/gather_emails.py`; do not execute! The sc
 
 
 ## User Stories
-Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `<actor>|<requirement>|<description>`. User stories form the basis of tests and code.
+Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `actor | requirement | description`. User stories form the basis of tests and code.
 
 actor | requirement | description
 engineer | tests to mock the `simplegmail` Gmail client | all tests are deterministic and reproducible
@@ -18,11 +18,16 @@ human | read `sender`, `recipient`, `cc`, and `bcc` off each `simplegmail` `Mess
 engineer | the output to be streamed to a single CSV file | the file itself could be larger than the amount of memory we have
 engineer | the output filename should default to `gathered_results.csv` (overridable via `--out` for tests and ad-hoc runs) | so that the next step knows what it needs to load
 engineer | the array columns (`emails`, `label_ids`) in the output CSV to be `|`-delimited | arrays of strings can be split apart in the next phase
+engineer | `emails` pipe-joined in `sender`, `recipient`, `cc`, `bcc` order with empty fields omitted, so position does not identify the source field | consumers get a stable join order but must not rely on position to recover which field a value came from
+engineer | the known `|`-delimiter limitation accepted and documented: `|` is technically legal inside an RFC 5322 address local part and would corrupt the join, but Gmail addresses cannot contain `|` | downstream phases discovering this spec's contract know the delimiter is safe for Gmail data
 engineer | use [`simplegmail`](https://github.com/JosephMRally/simplegmail/tree/pagination) (it is already installed) to connect to Gmail | it wraps the Gmail API and speeds up development
 human | a clear error message and non-zero exit code when neither the saved token (`~/gmail-token.json`) nor the OAuth client (`~/client_secret.json`) exists | so that the user understands why authentication cannot proceed and how to fix it
 agent | python args and exit codes are used | so that LLM harness executing the code knows the status
 engineer | pass both `~/gmail-token.json` (creds_file) and `~/client_secret.json` (client_secret_file) to the Gmail constructor; a valid saved token is reused | so that signing in isnt necessary a second time
-engineer | include a flag for logging | so that i can see messages are being processed for testing
+human | a `--client-secret PATH` flag to override the OAuth client JSON location (default: `~/client_secret.json`) | i can authenticate with an OAuth client stored somewhere other than my home directory
+human | a `--token PATH` flag to override the saved OAuth token location (default: `~/gmail-token.json`) | i can reuse a saved token stored somewhere other than my home directory
+human | a `--page-size N` flag for how many messages are fetched per Gmail API page, 1-500 (default: 500) | i can lower the page size for small test runs or when the API misbehaves, while the default keeps a whole-mailbox sweep to the fewest requests
+engineer | include a flag for logging, `-v`/`--verbose` (off by default) | so that i can see messages are being processed for testing
 human | treat `sender` as strings and `cc`/`bcc`/`recipient` as lists of strings (any may be empty/None), carrying every value as-is — no parsing, validation, normalization, or dedup | the output stays 1:1 with the source and all transformations happen in later phases
 engineer | exactly one row per message, even when all address fields are empty | every source message is represented 1:1 in the extract
 
@@ -33,16 +38,13 @@ When running the sweep, pass `--verbose` to watch messages being processed (logg
 
 
 ## Output Schema
-The output should be streamed to a single CSV — exactly one row per message, 1:1 with the source (a message with no addresses still yields a row with an empty `emails` cell):
 name, type, format (optional)
 `header_date`, str, ISO-8601 with tz offset or raw RFC 2822; empty when the message has no `Date` header
 `internal_date`, str, epoch milliseconds; present for every message
 `thread_id`, str
 `message_id`, str
-`emails`, array<str>, `|`-joined; `sender`, `recipient`, `cc`, `bcc` order with empty fields omitted (position does not identify the source field)
+`emails`, array<str>, `|`-joined
 `label_ids`, array<str>, `|`-joined
-
-Known limitation: `|` is technically legal inside an RFC 5322 address local part and would corrupt the `|`-join, but Gmail addresses cannot contain `|` — accepted for this tool.
 
 # Finally
 Follow strict TDD (see `generate_SKILL.md` and `CLAUDE.md`): write the tests derived from the user stories first and run them to show they fail (red) **before** changing any implementation; then implement until green and report both runs. Every user story must map to at least one test that was observed failing first. Commit after green.

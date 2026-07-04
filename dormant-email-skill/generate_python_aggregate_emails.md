@@ -1,9 +1,9 @@
 # Generate python script
 
 ## User Stories
-Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `<actor>|<requirement>|<description>`. User stories form the basis of tests and code.
+Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `actor | requirement | description`. User stories form the basis of tests and code.
 
-<actor>|<requirement>|<description>
+actor | requirement | description
 engineer | parse every raw `header_date` string from the extract (ISO-8601 with tz offset, or the raw RFC 2822 header) and normalize to UTC `YYYY-MM-DD` before any earliest/latest comparison | comparing mixed-format raw strings gives wrong earliest/latest — this phase owns the Transform of dates
 engineer | when `header_date` is empty or unparseable, fall back to `internal_date` (epoch milliseconds -> UTC `YYYY-MM-DD`) | we always have a email date
 engineer | split each `|`-joined `emails` value into elements, split comma-separated addresses within an element, strip display names (`Alice <a@x.com>` -> `a@x.com`), lowercase, and dedup | the extract carries raw header values 1:1; this phase owns the Transform of addresses so downstream matching against user-entered addresses works
@@ -13,7 +13,7 @@ agent | the input contract discovered at runtime — a sub agent reads `generate
 engineer | stream-read the input CSV | the file could be larger than the amount of memory we have
 engineer | the input path to default to the extract's default output filename, overridable via `--in` | the pipeline runs with no args while tests point at fixtures
 engineer | aggregate with a dict/map: key=`thread_id`, value=tuple of [`earliest_date` (min function), `latest_date` (max function), `emails`, `message_ids`] | a single pass accumulates per-thread state
-engineer | the result written to a single CSV file | the next phase consumes one file
+engineer | the result written to a single CSV file, defaulting to `aggregated_results.csv` and overridable via `--out` | the next phase (filter) consumes one file and depends on that default filename
 
 
 ## Function

@@ -252,3 +252,80 @@ def test_module_never_touches_gmail():
     # story: no Gmail access, no deletion — computing the list has no side
     # effects, so the module must not even import the Gmail wrapper
     assert "simplegmail" not in sys.modules
+
+
+# --- domains: a bare entry covers the whole domain and its subdomains ----------
+
+def test_select_dormant_excludes_whole_domain_including_subdomains():
+    rows = [
+        arow("t1", "2010-01-01", "2011-01-01", "billing@wm.com", "m1"),
+        arow("t2", "2010-01-01", "2011-02-01", "alerts@notify.wm.com", "m2"),
+        arow("t3", "2010-01-01", "2011-03-01", "wm.com@gmail.com", "m3"),
+    ]
+    state = build_address_state(iter(rows))
+    result = select_dormant(state, cutoff=date(2021, 1, 1), exclude={"wm.com"})
+    # the bare domain matches after the @ only: the exact domain and its
+    # subdomains, never a local part that happens to look like it
+    assert set(result) == {"wm.com@gmail.com"}
+
+
+def test_main_ignore_accepts_bare_domains(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "billing@wm.com|old@x.com", "m1"),
+        arow("t2", "2010-01-01", "2011-01-01", "alerts@notify.wm.com", "m2"),
+    ])
+    out = tmp_path / "filtered.csv"
+
+    main(["--in", str(inp), "--out", str(out), "--ignore", "wm.com",
+          "--retain", "", "--years", "5", "--today", "2026-07-04"])
+
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # all of wm.com ignored
+
+
+def test_main_retain_accepts_bare_domains(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "billing@wm.com|old@x.com", "m1"),
+    ])
+    out = tmp_path / "filtered.csv"
+
+    main(["--in", str(inp), "--out", str(out), "--ignore", "",
+          "--retain", "wm.com", "--years", "5", "--today", "2026-07-04"])
+
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # wm.com retained
+
+
+# --- case-insensitivity: everything lowercased before comparison ---------------
+
+def test_build_state_lowercases_and_merges_csv_addresses():
+    # the CSV may not honor the aggregate's lowercase contract (hand-edited,
+    # third-party); the filter lowercases on read so the same sender merges
+    rows = [
+        arow("t1", "2019-01-01", "2020-01-01", "Alice@X.com", "m1"),
+        arow("t2", "2018-01-01", "2021-01-01", "alice@x.com", "m2"),
+    ]
+    state = build_address_state(iter(rows))
+    assert set(state) == {"alice@x.com"}
+    assert state["alice@x.com"][0] == "2018-01-01"
+    assert state["alice@x.com"][2] == ["t1", "t2"]
+
+
+def test_main_inputs_match_case_insensitively(tmp_path):
+    # mixed-case CSV addresses and mixed-case ignore entries still match
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "Billing@WM.com|old@x.com", "m1"),
+    ])
+    out = tmp_path / "filtered.csv"
+
+    main(["--in", str(inp), "--out", str(out), "--ignore", "wm.COM",
+          "--retain", "", "--years", "5", "--today", "2026-07-04"])
+
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert [r[0] for r in rows[1:]] == ["old@x.com"]
