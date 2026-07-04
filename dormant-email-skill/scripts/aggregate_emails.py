@@ -10,10 +10,12 @@ The extract (see generate_python_gather_emails.md, whose output contract this
 script consumes — discovered at generation time, not duplicated here) is 1:1
 raw, so this phase owns both Transforms:
 
-- dates: the raw simplegmail date string (ISO-8601 with tz offset, or the raw
+- dates: the raw `header_date` string (ISO-8601 with tz offset, or the raw
   RFC 2822 header) is normalized to UTC YYYY-MM-DD before any min/max
-  comparison; a row whose date cannot be parsed is skipped and reported on
-  stderr.
+  comparison; when it is empty or unparseable the row falls back to
+  `internal_date` (Gmail's internalDate, epoch milliseconds — present for
+  every message). A row is skipped and reported on stderr only when both are
+  unusable.
 - addresses: each `|`-joined `emails` value is split into elements, elements
   are split on commas, display names are stripped (Alice <a@x.com> -> a@x.com),
   lowercased, and deduped.
@@ -39,7 +41,7 @@ DEFAULT_OUT = "aggregated_results.csv"
 
 
 def normalize_date(value):
-    """Raw extract date string -> UTC ``YYYY-MM-DD``; ``None`` if unparseable.
+    """Raw ``header_date`` string -> UTC ``YYYY-MM-DD``; ``None`` if unparseable.
 
     Handles both shapes the extract carries as-is: simplegmail's usual
     ``str(datetime.astimezone())`` (ISO-8601, space separator, tz offset) and
@@ -61,6 +63,26 @@ def normalize_date(value):
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%d")
+
+
+def epoch_ms_to_date(value):
+    """Gmail ``internalDate`` (epoch-milliseconds string) -> UTC ``YYYY-MM-DD``.
+
+    Returns ``None`` when the cell is empty or not a number (e.g. the extract
+    ran against a fork build that does not expose internal_date yet).
+    """
+    if not value:
+        return None
+    try:
+        ms = int(str(value).strip())
+    except ValueError:
+        return None
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def _row_date(r):
+    """UTC ``YYYY-MM-DD`` for an extract row: header_date, else internal_date."""
+    return normalize_date(r.get("header_date")) or epoch_ms_to_date(r.get("internal_date"))
 
 
 def split_emails(cell):
@@ -88,16 +110,18 @@ def aggregate(rows):
     """One streaming pass: dict keyed by thread_id.
 
     ``rows`` is an iterator of dicts with the extract's columns. Returns
-    ``{thread_id: (earliest, latest, emails, message_ids)}``. Rows whose date
-    cannot be parsed are skipped entirely and reported on stderr.
+    ``{thread_id: (earliest, latest, emails, message_ids)}``. A row is skipped
+    (and reported on stderr) only when header_date AND internal_date are both
+    unusable.
     """
     threads = {}
     for r in rows:
-        date = normalize_date(r.get("date"))
+        date = _row_date(r)
         if date is None:
             print(
                 f"skipping row (message_id={r.get('message_id', '') or '?'}): "
-                f"unparseable date {r.get('date')!r}",
+                f"unusable header_date {r.get('header_date')!r} and "
+                f"internal_date {r.get('internal_date')!r}",
                 file=sys.stderr,
             )
             continue

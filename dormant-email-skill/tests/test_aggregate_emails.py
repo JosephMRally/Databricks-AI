@@ -5,9 +5,12 @@ All local: fixture CSVs on disk, no Gmail, no network.
 
 Input contract (discovered at runtime by a sub agent from
 generate_python_gather_emails.md, per that spec's "agent" story):
-- columns: date, thread_id, message_id, emails, label_ids
-- `date` is the RAW simplegmail date string (ISO-8601 with tz offset, or the
-  raw RFC 2822 header) — this phase owns normalizing it to UTC YYYY-MM-DD
+- columns: header_date, internal_date, thread_id, message_id, emails, label_ids
+- `header_date` is the RAW simplegmail date string (ISO-8601 with tz offset,
+  or the raw RFC 2822 header; empty when the message has no Date header) —
+  this phase owns normalizing it to UTC YYYY-MM-DD
+- `internal_date` is Gmail's internalDate (epoch-milliseconds string, present
+  for every message) — the fallback when header_date is empty/unparseable
 - `emails` is `|`-joined RAW header values (display names, mixed case, an
   element may hold several comma-separated addresses) — this phase owns
   splitting/normalizing them
@@ -25,7 +28,8 @@ from scripts.aggregate_emails import (
     split_emails,
 )
 
-INPUT_HEADER = ["date", "thread_id", "message_id", "emails", "label_ids"]
+INPUT_HEADER = ["header_date", "internal_date", "thread_id", "message_id",
+                "emails", "label_ids"]
 
 
 def write_input(path, rows):
@@ -93,8 +97,9 @@ def test_split_empty_cell():
 
 # --- aggregate: one pass, dict keyed by thread_id ------------------------------
 
-def row(date, thread_id, message_id, emails, label_ids=""):
-    return {"date": date, "thread_id": thread_id, "message_id": message_id,
+def row(header_date, thread_id, message_id, emails, label_ids="", internal_date=""):
+    return {"header_date": header_date, "internal_date": internal_date,
+            "thread_id": thread_id, "message_id": message_id,
             "emails": emails, "label_ids": label_ids}
 
 
@@ -122,9 +127,29 @@ def test_aggregate_collects_normalized_emails_and_message_ids():
     assert message_ids == ["m1", "m2"]
 
 
+def test_aggregate_prefers_header_date_over_internal_date():
+    rows = [row("2020-01-01 00:00:00+00:00", "t1", "m1", "a@x.com",
+                internal_date="1713123673715")]
+    assert aggregate(iter(rows))["t1"][0] == "2020-01-01"
+
+
+def test_aggregate_falls_back_to_internal_date_when_header_empty():
+    # e.g. a SENT message with no Date header: internalDate still dates it
+    rows = [row("", "t1", "m1", "a@x.com", internal_date="1713123673715")]
+    result = aggregate(iter(rows))
+    assert result["t1"][0] == result["t1"][1] == "2024-04-14"
+    assert result["t1"][2] == ["a@x.com"]  # row contributes, not skipped
+
+
+def test_aggregate_falls_back_when_header_date_unparseable():
+    rows = [row("garbage", "t1", "m1", "a@x.com", internal_date="1713123673715")]
+    assert aggregate(iter(rows))["t1"][0] == "2024-04-14"
+
+
 def test_aggregate_skips_unparseable_date_rows_and_reports_stderr(capsys):
+    # skipped only when BOTH header_date and internal_date are unusable
     rows = [
-        row("garbage-date", "t1", "m1", "a@x.com"),
+        row("garbage-date", "t1", "m1", "a@x.com"),  # internal_date="" too
         row("2020-01-01 00:00:00+00:00", "t1", "m2", "b@x.com"),
     ]
     result = aggregate(iter(rows))
@@ -165,9 +190,10 @@ def test_main_missing_input_exits_nonzero_naming_the_file(tmp_path, capsys):
 def test_main_end_to_end_writes_one_row_per_thread(tmp_path):
     src = tmp_path / "gathered_results.csv"
     write_input(src, [
-        ["2019-03-05 14:22:01-08:00", "t1", "m1", "Alice <A@X.com>|b@x.com", "INBOX"],
-        ["Tue, 5 Mar 2019 23:30:00 -0800", "t1", "m2", "b@x.com, c@x.com", ""],
-        ["2022-05-05 12:00:00+00:00", "t2", "m3", "", "SENT"],
+        ["2019-03-05 14:22:01-08:00", "1551824521000", "t1", "m1",
+         "Alice <A@X.com>|b@x.com", "INBOX"],
+        ["Tue, 5 Mar 2019 23:30:00 -0800", "", "t1", "m2", "b@x.com, c@x.com", ""],
+        ["", "1713123673715", "t2", "m3", "", "SENT"],  # no Date header at all
     ])
     out = tmp_path / "aggregated_results.csv"
     rc = main(["--in", str(src), "--out", str(out)])
@@ -185,5 +211,6 @@ def test_main_end_to_end_writes_one_row_per_thread(tmp_path):
     assert t1[3] == "a@x.com|b@x.com|c@x.com" # normalized, deduped, pipe-joined
     assert t1[4] == "m1|m2"
     assert t2[0] == "t2"
+    assert t2[1] == t2[2] == "2024-04-14"     # dated via internal_date fallback
     assert t2[3] == ""                        # no addresses in the source row
     assert t2[4] == "m3"

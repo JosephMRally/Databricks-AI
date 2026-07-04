@@ -4,7 +4,8 @@
 Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `<actor>|<requirement>|<description>`. User stories form the basis of tests and code.
 
 <actor>|<requirement>|<description>
-engineer | parse every raw `date` string from the extract (ISO-8601 with tz offset, or the raw RFC 2822 header) and normalize to UTC `YYYY-MM-DD` before any earliest/latest comparison; a row whose date cannot be parsed is skipped and reported on stderr | comparing mixed-format raw strings gives wrong earliest/latest — this phase owns the Transform of dates
+engineer | parse every raw `header_date` string from the extract (ISO-8601 with tz offset, or the raw RFC 2822 header) and normalize to UTC `YYYY-MM-DD` before any earliest/latest comparison | comparing mixed-format raw strings gives wrong earliest/latest — this phase owns the Transform of dates
+engineer | when `header_date` is empty or unparseable, fall back to `internal_date` (epoch milliseconds -> UTC `YYYY-MM-DD`); skip the row and report it on stderr only when both are unusable | some messages have no `Date` header, but Gmail's `internalDate` always exists — every message can be dated
 engineer | split each `|`-joined `emails` value into elements, split comma-separated addresses within an element, strip display names (`Alice <a@x.com>` -> `a@x.com`), lowercase, and dedup | the extract carries raw header values 1:1; this phase owns the Transform of addresses so downstream matching against user-entered addresses works
 engineer | this script to be the Load and Transform (LT) of the ELT pipeline | the extract stays raw; this phase produces the typed, normalized data downstream phases consume
 human | to know the earliest and latest date of every email thread | dormant threads can be identified in the next phase
