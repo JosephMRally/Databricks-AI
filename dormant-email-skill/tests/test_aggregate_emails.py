@@ -127,6 +127,18 @@ def test_aggregate_collects_normalized_emails_and_message_ids():
     assert message_ids == ["m1", "m2"]
 
 
+def test_aggregate_merges_case_variant_addresses_across_rows():
+    # story: every address lower-cased before any processing (dedup,
+    # aggregation, output) — the same sender in different capitalization
+    # across messages collapses to one element
+    rows = [
+        row("2020-01-01 00:00:00+00:00", "t1", "m1", "Alice@X.com"),
+        row("2020-01-02 00:00:00+00:00", "t1", "m2", "ALICE@x.COM"),
+    ]
+    result = aggregate(iter(rows))
+    assert result["t1"][2] == ["alice@x.com"]
+
+
 def test_aggregate_prefers_header_date_over_internal_date():
     rows = [row("2020-01-01 00:00:00+00:00", "t1", "m1", "a@x.com",
                 internal_date="1713123673715")]

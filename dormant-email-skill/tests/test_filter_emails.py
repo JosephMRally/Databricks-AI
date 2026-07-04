@@ -1,6 +1,6 @@
 """TDD tests for Phase 3 filter_emails.py — the per-address delete list.
 
-Contract (per generate_python_filter.md): a single streaming sweep over the
+Contract (per generate_python_filter_emails.md): a single streaming sweep over the
 aggregate's per-thread CSV builds per-address state (first seen = min
 earliest_date, last seen = max latest_date, thread_ids/message_ids collected),
 then everything is a filter: an address lands on the delete list only when its
@@ -415,6 +415,25 @@ def test_main_queries_file_empty_when_delete_list_is_empty(tmp_path):
           "--today", "2026-07-04"])
 
     assert (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8") == ""
+
+
+def test_main_prompt_entries_lowercased_before_matching(tmp_path, monkeypatch):
+    # story: every source — including the PROMPTS, not just CLI args — is
+    # lower-cased before any processing
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "billing@wm.com|old@x.com", "m1"),
+    ])
+    out = tmp_path / "filtered.csv"
+    # ignore prompt answered "WM.COM"; retain and years accept defaults
+    monkeypatch.setattr("sys.stdin", io.StringIO("WM.COM\n\n\n"))
+
+    rc = main(["--in", str(inp), "--out", str(out), "--today", "2026-07-04"])
+
+    assert rc == 0
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert [r[0] for r in rows[1:]] == ["old@x.com"]
 
 
 def test_main_inputs_match_case_insensitively(tmp_path):
