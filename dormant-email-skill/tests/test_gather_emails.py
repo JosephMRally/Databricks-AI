@@ -6,8 +6,9 @@ real `simplegmail` ones. No network, no credentials, no real addresses.
 Contract (per generate_python_gather_emails.md): this phase is the Extract of
 an ELT — exactly one CSV row per message, with the raw sender/recipient/cc/bcc
 values carried as-is (no parsing, validation, normalization, or dedup) and
-pipe-joined into the `emails` column, empty fields omitted. Dates are the one
-exception: normalized to UTC YYYY-MM-DD, empty cell when unparseable.
+pipe-joined into the `emails` column, empty fields omitted. Dates too are
+carried as-is (the raw simplegmail date string); normalization is the next
+phase's job. Output defaults to gathered_results.csv.
 
 Reference shapes (from simplegmail source):
 - `Message.sender` / `Message.recipient` are strings (a header value, which may
@@ -26,7 +27,6 @@ from scripts.gather_emails import (
     CSV_HEADER,
     MailboxSweepFacade,
     main,
-    normalize_date,
     raw_values,
 )
 
@@ -64,30 +64,38 @@ class FakeGmail:
         return list(self._messages)
 
 
-# --- normalize_date ----------------------------------------------------------
+# --- dates: carried as-is, the Extract does not parse -------------------------
 
-def test_normalize_date_simplegmail_offset_format():
-    # simplegmail emits str(datetime.astimezone()): space separator + tz offset
-    assert normalize_date("2019-03-05 14:22:01-08:00") == "2019-03-05"
-
-
-def test_normalize_date_converts_to_utc():
-    # 23:30 at -08:00 is 07:30 the next day in UTC
-    assert normalize_date("2019-03-05 23:30:00-08:00") == "2019-03-06"
-
-
-def test_normalize_date_iso_z():
-    assert normalize_date("2024-11-30T23:59:59Z") == "2024-11-30"
+def test_sweep_carries_date_as_is_no_utc_conversion(tmp_path):
+    # spec: "dates carried as-is (the raw simplegmail date string) with no
+    # parsing or conversion" — the tz offset survives untouched, the day is
+    # NOT rolled to UTC; normalization is the next phase's job
+    m = message("m1", "t1", "2019-03-05 23:30:00-08:00", sender="a@x.com")
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][0] == "2019-03-05 23:30:00-08:00"
 
 
-def test_normalize_date_rfc2822_fallback():
-    assert normalize_date("Tue, 5 Mar 2019 14:22:01 +0000") == "2019-03-05"
+def test_sweep_carries_rfc2822_fallback_date_as_is(tmp_path):
+    # simplegmail's raw RFC 2822 fallback passes through verbatim too
+    raw = "Tue, 5 Mar 2019 14:22:01 +0000"
+    m = message("m1", "t1", raw, sender="a@x.com")
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][0] == raw
 
 
-def test_normalize_date_malformed_returns_empty():
-    assert normalize_date("not a date") == ""
-    assert normalize_date("") == ""
-    assert normalize_date(None) == ""
+def test_sweep_missing_date_yields_empty_cell(tmp_path):
+    m = message("m1", "t1", None, sender="a@x.com")
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][0] == ""
 
 
 # --- raw_values: as-is Extract, no transformations ---------------------------
@@ -138,7 +146,7 @@ def test_sweep_writes_header_and_one_row_per_message(tmp_path):
     assert rows[0] == CSV_HEADER
     assert n == 1
     row = rows[1]
-    assert row[0] == "2019-03-05"  # date normalized to UTC YYYY-MM-DD
+    assert row[0] == "2019-03-05 14:22:01+00:00"  # raw date string, as-is
     assert row[1] == "t1"
     assert row[2] == "m1"
     # raw values as-is, sender/recipient/cc/bcc order, pipe-joined
@@ -156,16 +164,16 @@ def test_sweep_empty_mailbox_writes_header_only(tmp_path):
     assert rows == [CSV_HEADER]
 
 
-def test_sweep_emits_a_row_even_with_no_addresses_or_date(tmp_path):
-    # 1:1 with the source: a message with empty address fields and a garbage
-    # date still yields its row — empty `emails` and `date` cells, ids kept.
+def test_sweep_emits_a_row_even_with_no_addresses(tmp_path):
+    # 1:1 with the source: a message with empty address fields still yields
+    # its row — and even a garbage date is carried as-is, not judged here.
     m = message("m2", "t2", "garbage-date", sender="", recipient="", cc=[], bcc=[])
-    out = tmp_path / "occurrences.csv"
+    out = tmp_path / "gathered_results.csv"
     n = MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
     assert n == 1
-    assert rows[1] == ["", "t2", "m2", "", ""]
+    assert rows[1] == ["garbage-date", "t2", "m2", "", ""]
 
 
 def test_sweep_omits_empty_fields_from_emails_join(tmp_path):
@@ -349,6 +357,34 @@ def test_main_passes_page_size_to_sweep(tmp_path, monkeypatch):
                "--page-size", "42"])
     assert rc == 0
     assert seen["page_size"] == 42
+
+
+def test_default_out_is_gathered_results():
+    # story: "the output filename should default to gathered_results.csv ...
+    # so that the next step knows what it needs to load"
+    from scripts.gather_emails import DEFAULT_OUT
+    assert DEFAULT_OUT == "gathered_results.csv"
+
+
+def test_main_writes_gathered_results_by_default(tmp_path, monkeypatch):
+    cs = tmp_path / "credentials.json"
+    cs.write_text("{}")
+    monkeypatch.chdir(tmp_path)
+
+    class FakeFacade:
+        def sweep(self, out_csv, page_size=None):
+            with open(out_csv, "w", encoding="utf-8") as fh:
+                fh.write(",".join(CSV_HEADER) + "\n")
+            return 0
+
+    monkeypatch.setattr(
+        MailboxSweepFacade, "from_simplegmail",
+        classmethod(lambda cls, client_secret=None, token=None: FakeFacade()),
+    )
+
+    rc = main(["--client-secret", str(cs)])   # no --out: pipeline default
+    assert rc == 0
+    assert (tmp_path / "gathered_results.csv").exists()
 
 
 def test_main_verbose_flag_sets_info_level(tmp_path, monkeypatch):

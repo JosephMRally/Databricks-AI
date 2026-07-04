@@ -3,15 +3,16 @@
 Running this script once sweeps the whole mailbox and streams exactly one CSV
 row per message, 1:1 with the source:
 
-    date(YYYY-MM-DD), thread_id, message_id, emails(pipe-joined), label_ids(pipe-joined)
+    date(raw, as-is), thread_id, message_id, emails(pipe-joined), label_ids(pipe-joined)
 
-This phase is the Extract of an ELT: the raw ``sender`` / ``recipient`` /
-``cc`` / ``bcc`` values are carried as-is — no parsing, validation,
-normalization, or dedup (splitting and normalizing addresses is the next
-phase's job). ``emails`` holds those values in that order with empty fields
-omitted; position does not identify which field a value came from. Dates are
-the one sanctioned transformation: normalized to UTC ``YYYY-MM-DD``, with an
-empty cell when the source date is unparseable.
+This phase is the Extract of an ELT: no transformation of any source value.
+The raw ``sender`` / ``recipient`` / ``cc`` / ``bcc`` values are carried as-is
+— no parsing, validation, normalization, or dedup — pipe-joined into
+``emails`` in that order with empty fields omitted (position does not identify
+which field a value came from). The ``date`` cell is the raw ``simplegmail``
+date string as-is (usually ISO-8601 with a tz offset, or the raw RFC 2822
+header when simplegmail could not parse it); parsing and normalization belong
+to the next phase.
 
 The Facade hides the Gmail API behind a single ``sweep()`` call. Its core logic
 depends only on the *shape* of a ``simplegmail`` ``Message`` — ``.sender`` and
@@ -38,8 +39,6 @@ import csv
 import logging
 import os
 import sys
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 
 logger = logging.getLogger("gather_emails")
 
@@ -50,32 +49,8 @@ ADDRESS_FIELDS = ("sender", "recipient", "cc", "bcc")
 # Messages fetched per Gmail API page (the pagination fork allows 1-500; the
 # maximum keeps a whole-mailbox sweep to the fewest requests).
 DEFAULT_PAGE_SIZE = 500
-
-
-def normalize_date(value):
-    """A ``simplegmail`` ``Message.date`` -> ``YYYY-MM-DD`` (UTC); "" if unparseable.
-
-    ``simplegmail`` sets ``date`` to ``str(dateutil.parse(header).astimezone())``
-    — an ISO-8601 string with a space separator and a tz offset, e.g.
-    ``"2019-03-05 14:22:01-08:00"`` — but falls back to the raw RFC 2822 ``Date``
-    header if that parse failed. Handle both, and express the day in UTC.
-    """
-    if not value or not isinstance(value, str):
-        return ""
-    text = value.strip()
-    dt = None
-    try:
-        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        try:
-            dt = parsedate_to_datetime(text)  # RFC 2822 fallback
-        except (TypeError, ValueError, IndexError):
-            return ""
-    if dt is None:
-        return ""
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc)
-    return dt.strftime("%Y-%m-%d")
+# The pipeline contract: the next phase loads this file by default.
+DEFAULT_OUT = "gathered_results.csv"
 
 
 def raw_values(field):
@@ -114,7 +89,7 @@ def _message_row(message):
     for field_name in ADDRESS_FIELDS:
         emails.extend(raw_values(getattr(message, field_name, None)))
     return [
-        normalize_date(getattr(message, "date", "")),
+        getattr(message, "date", "") or "",  # raw as-is; next phase parses
         getattr(message, "thread_id", "") or "",
         getattr(message, "id", "") or "",
         ARRAY_DELIMITER.join(emails),
@@ -188,8 +163,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Sweep the whole Gmail mailbox (via simplegmail) into an occurrences CSV."
     )
-    parser.add_argument("--out", default="occurrences.csv",
-                        help="output CSV path (streamed)")
+    parser.add_argument("--out", default=DEFAULT_OUT,
+                        help=f"output CSV path, streamed (default: {DEFAULT_OUT}; "
+                             "the next phase loads this filename)")
     parser.add_argument("--client-secret", default=None,
                         help="OAuth client JSON (default: ~/client_secret.json)")
     parser.add_argument("--token", default=None,

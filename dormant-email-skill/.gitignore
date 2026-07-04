@@ -3,4 +3,5 @@ __pycache__/
 .venv/
 .pytest_cache/
 .DS_Store
-occurrences.csv
+gathered_results.csv
+aggregated_results.csv
