@@ -13,7 +13,9 @@ The raw ``sender`` / ``recipient`` / ``cc`` / ``bcc`` values are carried as-is
 which field a value came from). ``header_date`` is the raw ``simplegmail``
 date string as-is (usually ISO-8601 with a tz offset, or the raw RFC 2822
 header when simplegmail could not parse it; empty when the message has no
-``Date`` header). ``internal_date`` is Gmail's ``internalDate`` — the
+``Date`` header) — read from the fork's ``Message.headerDate`` (a ``str``;
+the fork renamed upstream's ``Message.date``; a ``header_date`` attribute is
+accepted too). ``internal_date`` is Gmail's ``internalDate`` — the
 epoch-milliseconds server receive time, present for every message — read from
 the fork's ``Message.internalDate`` (``Optional[int]``; an ``internal_date``
 attribute is accepted too), with an empty cell when absent or None. Parsing
@@ -23,7 +25,7 @@ The Facade hides the Gmail API behind a single ``sweep()`` call. Its core logic
 depends only on the *shape* of a ``simplegmail`` ``Message`` — ``.sender`` (a
 string), ``.recipient`` / ``.cc`` / ``.bcc`` (``List[str]`` per the spec; the
 installed fork still emits ``recipient`` as an unsplit string, and every
-address field is handled as either shape), ``.date`` (a
+address field is handled as either shape), ``.headerDate`` (a
 ``str(datetime.astimezone())``), ``.id``, ``.thread_id``, and ``.label_ids``
 (``Label`` objects) — so tests inject a fake client and need no credentials or
 network.
@@ -87,6 +89,19 @@ def _label_ids(message):
     return ARRAY_DELIMITER.join(getattr(lbl, "id", None) or str(lbl) for lbl in labels)
 
 
+def _header_date(message):
+    """The raw simplegmail date string; "" when the message has no Date header.
+
+    The installed fork exposes ``Message.headerDate`` (a ``str``; it renamed
+    upstream's ``Message.date``, which no longer exists); a ``header_date``
+    attribute is accepted too, per the spec.
+    """
+    value = getattr(message, "headerDate", None)
+    if value is None:
+        value = getattr(message, "header_date", None)
+    return value or ""
+
+
 def _internal_date(message):
     """Gmail's internalDate as a string of epoch milliseconds; "" when absent.
 
@@ -110,7 +125,7 @@ def _message_row(message):
     for field_name in ADDRESS_FIELDS:
         emails.extend(raw_values(getattr(message, field_name, None)))
     return [
-        getattr(message, "date", "") or "",  # raw as-is; next phase parses
+        _header_date(message),  # raw as-is; next phase parses
         _internal_date(message),
         getattr(message, "thread_id", "") or "",
         getattr(message, "id", "") or "",

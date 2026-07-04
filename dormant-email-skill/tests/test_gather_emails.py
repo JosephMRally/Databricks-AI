@@ -18,8 +18,9 @@ Reference shapes:
   fork still emits `recipient` as an unsplit string (gmail.py builds it as
   `hdr['value']`), so the sweep must handle BOTH shapes; tests cover both.
 - `Message.cc` / `Message.bcc` are `List[str]` (header split on ", ").
-- `Message.date` is `str(dateutil.parse(header).astimezone())`, e.g.
-  "2019-03-05 14:22:01-08:00".
+- `Message.headerDate` is the fork's rename of upstream's `Message.date`
+  (which no longer exists): `str(dateutil.parse(header).astimezone())`, e.g.
+  "2019-03-05 14:22:01-08:00". A `header_date` attribute is accepted too.
 - `Message.label_ids` is a list of `Label` objects (each with `.id` / `.name`).
 """
 
@@ -45,15 +46,17 @@ class FakeLabel:
         self.name = name or id
 
 
-def message(msg_id, thread_id, date, sender="", recipient="",
+def message(msg_id, thread_id, header_date, sender="", recipient="",
             cc=None, bcc=None, label_ids=None, internal_date=None):
     """A stand-in exposing the attributes gather reads off a simplegmail Message.
 
-    ``internal_date`` is only set when given — omitting it models the
-    currently installed fork, which does not expose the attribute yet.
+    The installed fork exposes the raw date string as ``headerDate`` — there is
+    no ``date`` attribute (the fork renamed upstream's) — so the fixture models
+    that shape. ``internal_date`` is only set when given — omitting it models a
+    message where the fork exposes only camelCase ``internalDate`` (or nothing).
     """
     ns = SimpleNamespace(
-        id=msg_id, thread_id=thread_id, date=date,
+        id=msg_id, thread_id=thread_id, headerDate=header_date,
         sender=sender, recipient=recipient,
         cc=list(cc or []), bcc=list(bcc or []),
         label_ids=list(label_ids or []),
@@ -87,6 +90,47 @@ def test_sweep_carries_date_as_is_no_utc_conversion(tmp_path):
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
     assert rows[1][0] == "2019-03-05 23:30:00-08:00"
+
+
+def test_sweep_reads_headerDate_from_installed_fork(tmp_path):
+    # story: the fork renamed upstream's Message.date to Message.headerDate —
+    # a message with ONLY headerDate (no `date` attribute, like the installed
+    # fork) must still fill the header_date column
+    m = message("m1", "t1", "2019-03-05 14:22:01-08:00", sender="a@x.com")
+    assert not hasattr(m, "date")  # fixture models the fork: no such attribute
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][0] == "2019-03-05 14:22:01-08:00"
+
+
+def test_sweep_accepts_snake_case_header_date_attribute(tmp_path):
+    # story: "also accept a `header_date` attribute"
+    m = SimpleNamespace(
+        id="m1", thread_id="t1", header_date="2020-06-01 08:00:00+02:00",
+        sender="a@x.com", recipient="", cc=[], bcc=[], label_ids=[],
+    )
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][0] == "2020-06-01 08:00:00+02:00"
+
+
+def test_sweep_header_date_empty_when_no_date_attribute_at_all(tmp_path):
+    # story: "emit an empty cell when neither is present" — a message exposing
+    # neither headerDate nor header_date must not crash
+    m = SimpleNamespace(
+        id="m1", thread_id="t1",
+        sender="a@x.com", recipient="", cc=[], bcc=[], label_ids=[],
+    )
+    assert not hasattr(m, "headerDate") and not hasattr(m, "header_date")
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][0] == ""
 
 
 def test_sweep_carries_rfc2822_fallback_date_as_is(tmp_path):
