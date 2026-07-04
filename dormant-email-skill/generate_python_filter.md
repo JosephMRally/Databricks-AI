@@ -1,28 +1,38 @@
 # Generate python script
 
+## User Stories
+Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `actor | requirement | description`. User stories form the basis of tests and code.
+
+actor | requirement | description
+human | a **delete list**: the addresses I have not heard from since the cutoff, with every address that should not be deleted filtered out | the separate cleanup step that follows only ever sees mail that is safe to remove
+agent | the input contract discovered at runtime — a sub agent reads `generate_python_aggregate_emails.md` and returns its output schema, default output filename, array delimiters, and known limitations — never hardcoded here | this spec cannot go stale when the aggregate's spec changes
+engineer | one output row per dormant **address**, aggregated across every thread it appears in: first seen = min of the threads' `earliest_date`, last seen = max of their `latest_date`, with all of its `thread_id`s and `message_id`s collected | an address still active in any thread is not dormant, and the cleanup step gets the message ids it needs
+human | an address on the delete list only when its last-seen date is older than the cutoff (today − N years) | contacts I have not heard from since the cutoff are identified
+human | to be prompted for email addresses to ignore, defaulting to the account owner's address | my own address is in every thread and must never appear on the delete list
+engineer | the owner default inferred from the input data: the address that appears in the most threads in the input CSV | the owner is on essentially every thread of their own mailbox, so no Gmail auth is needed to identify them
+human | to be prompted for email addresses to retain | contacts I choose are never on the delete list, whatever their dates say
+human | to be prompted for an integer N for the cutoff (today − N years), defaulting to 5 | I control what counts as dormant without editing code
+agent | every prompt also settable via CLI args (`--ignore`, `--retain`, `--years`), which skip that prompt; python args and exit codes are used | the LLM harness can run the script non-interactively and knows the status
+engineer | "today" injectable via `--today YYYY-MM-DD`, defaulting to the current date | dormancy depends on the clock, so tests must be able to pin it
+engineer | a single streaming sweep over the aggregate's output CSV, holding per-address state only — no second pass, no recency re-scan | `latest_date` already answers "have I heard from them since?", and the file could be larger than memory
+engineer | this script reads the input CSV and writes the delete-list CSV, nothing else — no Gmail access, no deletion | deletion is a separate, deliberate action, never a side effect of computing the list; the `message_ids` column gives that step everything it needs
+human | first-seen and last-seen dates on every delete-list row | I can review how stale each contact is before anything is deleted
+engineer | the output written to a single CSV defaulting to `filtered_results.csv` (overridable via `--out`), with the input path defaulting to the aggregate's default output filename (overridable via `--in`) | the pipeline runs with no args while tests point at fixtures
+engineer | the array columns (`thread_ids`, `message_ids`) in the output CSV to be `|`-delimited | consistent with the rest of the pipeline
+engineer | test fixtures use fake addresses, and prompts are driven through CLI args or fed stdin in tests | tests are deterministic and touch no real account or terminal
+
+
 ## Function
-Create a python script called `scripts/filter_emails.py` that will:
-1. Prompt the user for email addresses that should be ignored; the account owners email should default. 
-2. Prompt the user for email addresses that should be retained. 
-3. Prompt the user for an integer to the cutoff (today − N years); default to 5 years.
-4. Do a single sweep over the CSV file.  
-5. Everything downstream is a filter on that CSV: an address is **dormant** if its `latest_date` is older than your cutoff (today − N years); a **first/last-seen contact list** is the CSV itself; and an optional cleanup step trashes the old mail of the addresses you choose. There is no second pass and no recency re-scan — `latest_date` already answers "have I heard from them since?"
+Create a python script called `scripts/filter_emails.py`; do not execute! It is the final **Filter phase of the ELT pipeline**: it turns the aggregate's per-thread CSV into a per-address **delete list**, filtering out every address that should not be deleted — the owner, ignored and retained addresses, and anyone heard from since the cutoff. The user stories above define its behavior.
 
 
-## Input
+## Output Schema
 name, type, format (optional)
-`email`, str
-`thread_id`, str
-`message_id`, str
-`earliest_date`, date, `YYYY-MM-DD`
-`latest_date`, date, `YYYY-MM-DD`
-
-
-## Output
-`thread_id`, str
-
-
-# Tests
+`email`, str, normalized (lowercase, bare address, as produced by the aggregate)
+`earliest_date`, date, `YYYY-MM-DD`; first seen across all the address's threads
+`latest_date`, date, `YYYY-MM-DD`; last seen across all the address's threads
+`thread_ids`, array<str>, `|`-joined
+`message_ids`, array<str>, `|`-joined
 
 
 # Finally

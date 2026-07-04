@@ -16,10 +16,10 @@ Never edit implementation and tests in the same step.
 ## Running tests
 
 ```
-.venv/bin/python -m pytest tests/ -q --ignore=tests/test_filter_emails.py
+.venv/bin/python -m pytest tests/ -q
 ```
 
-Use `.venv/bin/python` — pytest is installed in the project venv, not globally. `tests/test_filter_emails.py` predates its script (not yet regenerated) and fails at import; include it once that phase is executed.
+Use `.venv/bin/python` — pytest is installed in the project venv, not globally.
 
 ## Other rules
 

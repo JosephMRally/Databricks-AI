@@ -1,198 +1,254 @@
-"""TDD tests for scripts/filter_emails.py — Phase 3 / Filter.
+"""TDD tests for Phase 3 filter_emails.py — the per-address delete list.
 
-An address is dormant when its latest_date is older than today - N years.
-Threads are emitted when they contain >=1 dormant address and no retained
-address. All dates are injected so tests are deterministic; no MCP, no
-network, no real addresses.
+Contract (per generate_python_filter.md): a single streaming sweep over the
+aggregate's per-thread CSV builds per-address state (first seen = min
+earliest_date, last seen = max latest_date, thread_ids/message_ids collected),
+then everything is a filter: an address lands on the delete list only when its
+last-seen date is older than the cutoff (today − N years) and it is neither
+ignored (default: the inferred owner) nor retained. The script reads the input
+CSV and writes the delete-list CSV, nothing else — no Gmail access.
+
+Input contract discovered from generate_python_aggregate_emails.md: columns
+thread_id, earliest_date, latest_date, emails, message_ids; dates YYYY-MM-DD;
+arrays `|`-joined; addresses already normalized (lowercase, bare). All
+fixtures use fake addresses; prompts are driven via CLI args or stdin.
 """
 
 import csv
+import io
+import sys
 from datetime import date
 
 from scripts.filter_emails import (
-    compute_cutoff,
-    dormant_addresses,
+    CSV_HEADER,
+    DEFAULT_IN,
+    DEFAULT_OUT,
+    build_address_state,
+    infer_owner,
     main,
-    resolve_dormant_threads,
+    select_dormant,
+    years_before,
 )
 
-TODAY = date(2026, 7, 1)
+
+# --- fixtures: rows shaped like the aggregate's output CSV -------------------
+
+def arow(thread_id, earliest, latest, emails, message_ids):
+    return {"thread_id": thread_id, "earliest_date": earliest,
+            "latest_date": latest, "emails": emails, "message_ids": message_ids}
 
 
-def write_csv(path, header, rows):
+def write_input(path, rows):
     with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(header)
+        writer = csv.DictWriter(
+            fh, fieldnames=["thread_id", "earliest_date", "latest_date",
+                            "emails", "message_ids"])
+        writer.writeheader()
         writer.writerows(rows)
 
 
-def write_aggregate(path, rows):
-    write_csv(path, ["email", "earliest_date", "latest_date"], rows)
+# A small mailbox: owner@x.com is on every thread (the owner); old@x.com was
+# last heard from in 2015; fresh@x.com is recent.
+def sample_rows():
+    return [
+        arow("t1", "2014-01-01", "2015-06-01", "owner@x.com|old@x.com", "m1|m2"),
+        arow("t2", "2020-01-01", "2026-01-01", "owner@x.com|fresh@x.com", "m3"),
+        arow("t3", "2019-05-05", "2019-05-05", "owner@x.com", "m4"),
+    ]
 
 
-def write_occurrences(path, rows):
-    write_csv(path, ["date", "thread_id", "message_id", "email", "labelIds"], rows)
+# --- per-address state: aggregated across every thread -----------------------
+
+def test_build_state_aggregates_per_address_across_threads():
+    rows = [
+        arow("t1", "2019-01-01", "2020-01-01", "a@x.com|b@x.com", "m1|m2"),
+        arow("t2", "2018-06-01", "2024-03-03", "a@x.com", "m3"),
+    ]
+    state = build_address_state(iter(rows))
+    earliest, latest, thread_ids, message_ids = state["a@x.com"]
+    assert earliest == "2018-06-01"          # min across threads
+    assert latest == "2024-03-03"            # max across threads
+    assert thread_ids == ["t1", "t2"]
+    assert message_ids == ["m1", "m2", "m3"]  # all messages of its threads
+    assert state["b@x.com"][2] == ["t1"]      # only where the address appears
 
 
-def read_csv(path):
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.reader(fh))
+def test_build_state_streams_from_a_lazy_iterator():
+    # single streaming sweep: rows arrive one at a time; never len()/index
+    def gen():
+        yield arow("t1", "2020-01-01", "2020-01-01", "a@x.com", "m1")
+        yield arow("t2", "2021-01-01", "2021-01-01", "b@x.com", "m2")
+
+    state = build_address_state(gen())
+    assert set(state) == {"a@x.com", "b@x.com"}
 
 
-# ---------------------------------------------------------------------------
-# Cutoff arithmetic
-# ---------------------------------------------------------------------------
+# --- owner inference: the address on the most threads -------------------------
 
-def test_compute_cutoff_default_five_years():
-    assert compute_cutoff(TODAY, 5) == date(2021, 7, 1)
-
-
-def test_compute_cutoff_handles_leap_day():
-    # Feb 29 minus N years lands on a non-leap year -> clamp to Feb 28
-    assert compute_cutoff(date(2024, 2, 29), 5) == date(2019, 2, 28)
+def test_infer_owner_is_address_on_most_threads():
+    state = build_address_state(iter(sample_rows()))
+    assert infer_owner(state) == "owner@x.com"  # on 3 threads, others on 1
 
 
-# ---------------------------------------------------------------------------
-# Dormancy sweep over the aggregate CSV
-# ---------------------------------------------------------------------------
-
-def test_dormant_is_latest_date_older_than_cutoff(tmp_path):
-    agg = tmp_path / "contacts.csv"
-    write_aggregate(str(agg), [
-        ["stale@example.com", "2010-01-01", "2019-06-30"],   # dormant
-        ["edge@example.com", "2010-01-01", "2021-07-01"],    # exactly cutoff: NOT dormant
-        ["fresh@example.com", "2010-01-01", "2026-06-01"],   # active
-    ])
-    result = dormant_addresses(str(agg), compute_cutoff(TODAY, 5),
-                               ignore=set(), retain=set())
-    assert result == {"stale@example.com"}
+def test_infer_owner_none_when_no_addresses():
+    assert infer_owner({}) is None
 
 
-def test_ignored_and_retained_addresses_are_never_dormant(tmp_path):
-    agg = tmp_path / "contacts.csv"
-    write_aggregate(str(agg), [
-        ["owner@example.com", "2000-01-01", "2001-01-01"],
-        ["keep@example.com", "2000-01-01", "2001-01-01"],
-        ["stale@example.com", "2000-01-01", "2001-01-01"],
-    ])
-    result = dormant_addresses(str(agg), compute_cutoff(TODAY, 5),
-                               ignore={"owner@example.com"},
-                               retain={"keep@example.com"})
-    assert result == {"stale@example.com"}
+# --- cutoff arithmetic: today − N years ---------------------------------------
+
+def test_years_before_subtracts_years():
+    assert years_before(date(2026, 7, 4), 5) == date(2021, 7, 4)
 
 
-def test_malformed_latest_date_is_not_dormant(tmp_path):
-    agg = tmp_path / "contacts.csv"
-    write_aggregate(str(agg), [
-        ["weird@example.com", "2000-01-01", "not-a-date"],
-        ["blank@example.com", "2000-01-01", ""],
-    ])
-    result = dormant_addresses(str(agg), compute_cutoff(TODAY, 5),
-                               ignore=set(), retain=set())
-    assert result == set()
+def test_years_before_clamps_feb_29():
+    assert years_before(date(2024, 2, 29), 1) == date(2023, 2, 28)
 
 
-# ---------------------------------------------------------------------------
-# Thread resolution over the occurrences CSV
-# ---------------------------------------------------------------------------
+# --- the filters: dormant, ignored, retained ----------------------------------
 
-def test_thread_emitted_when_it_has_a_dormant_address(tmp_path):
-    occ = tmp_path / "occurrences.csv"
-    write_occurrences(str(occ), [
-        ["2001-01-01", "t-old", "m1", "stale@example.com", ""],
-        ["2026-01-01", "t-new", "m2", "fresh@example.com", ""],
-    ])
-    threads = resolve_dormant_threads(str(occ), {"stale@example.com"}, retain=set())
-    assert threads == ["t-old"]
+def test_select_dormant_keeps_only_addresses_older_than_cutoff():
+    state = build_address_state(iter(sample_rows()))
+    result = select_dormant(state, cutoff=date(2021, 1, 1), exclude=set())
+    assert "old@x.com" in result       # last seen 2015 < cutoff
+    assert "fresh@x.com" not in result  # last seen 2026 >= cutoff
 
 
-def test_retained_address_protects_whole_thread(tmp_path):
-    occ = tmp_path / "occurrences.csv"
-    write_occurrences(str(occ), [
-        ["2001-01-01", "t-mixed", "m1", "stale@example.com", ""],
-        ["2001-01-01", "t-mixed", "m1", "keep@example.com", ""],
-        ["2001-01-01", "t-old", "m2", "stale@example.com", ""],
-    ])
-    threads = resolve_dormant_threads(str(occ), {"stale@example.com"},
-                                      retain={"keep@example.com"})
-    assert threads == ["t-old"]
+def test_select_dormant_last_seen_is_max_across_threads():
+    # dormant in one thread but active in another -> NOT dormant
+    rows = [
+        arow("t1", "2010-01-01", "2011-01-01", "a@x.com", "m1"),
+        arow("t2", "2025-01-01", "2025-06-01", "a@x.com", "m2"),
+    ]
+    state = build_address_state(iter(rows))
+    assert select_dormant(state, cutoff=date(2021, 1, 1), exclude=set()) == {}
 
 
-def test_no_dormant_addresses_yields_no_threads(tmp_path):
-    occ = tmp_path / "occurrences.csv"
-    write_occurrences(str(occ), [
-        ["2026-01-01", "t1", "m1", "fresh@example.com", ""],
-    ])
-    assert resolve_dormant_threads(str(occ), set(), retain=set()) == []
+def test_select_dormant_boundary_equal_to_cutoff_is_not_dormant():
+    # "older than the cutoff" is strict
+    rows = [arow("t1", "2021-01-01", "2021-01-01", "a@x.com", "m1")]
+    state = build_address_state(iter(rows))
+    assert select_dormant(state, cutoff=date(2021, 1, 1), exclude=set()) == {}
 
 
-# ---------------------------------------------------------------------------
-# CLI: prompts (owner defaults into ignore, 5-year default) and output file
-# ---------------------------------------------------------------------------
-
-def run_main(tmp_path, argv, inputs):
-    """Run main() with scripted stdin answers; returns output CSV rows."""
-    answers = iter(inputs)
-    out = tmp_path / "dormant_threads.csv"
-    main(argv + ["--out", str(out)], input_fn=lambda _prompt: next(answers),
-         today=TODAY)
-    return read_csv(str(out))
-
-
-def make_pipeline_files(tmp_path):
-    agg = tmp_path / "contacts.csv"
-    occ = tmp_path / "occurrences.csv"
-    write_aggregate(str(agg), [
-        ["owner@example.com", "2001-01-01", "2001-06-01"],   # owner: old but ignored
-        ["stale@example.com", "2001-01-01", "2001-06-01"],
-        ["keep@example.com", "2001-01-01", "2001-06-01"],
-        ["fresh@example.com", "2020-01-01", "2026-06-01"],
-    ])
-    write_occurrences(str(occ), [
-        ["2001-06-01", "t-owner-only", "m0", "owner@example.com", ""],
-        ["2001-06-01", "t-stale", "m1", "stale@example.com", ""],
-        ["2001-06-01", "t-protected", "m2", "stale@example.com", ""],
-        ["2001-06-01", "t-protected", "m2", "keep@example.com", ""],
-        ["2026-06-01", "t-fresh", "m3", "fresh@example.com", ""],
-    ])
-    return str(agg), str(occ)
-
-
-def test_main_interactive_defaults(tmp_path):
-    agg, occ = make_pipeline_files(tmp_path)
-    rows = run_main(
-        tmp_path,
-        ["--aggregate", agg, "--occurrences", occ, "--owner", "owner@example.com"],
-        inputs=["", "keep@example.com", ""],  # accept owner ignore, retain one, default 5y
+def test_select_dormant_excludes_ignored_and_retained():
+    state = build_address_state(iter(sample_rows()))
+    result = select_dormant(
+        state, cutoff=date(2026, 7, 1),          # everyone is old enough...
+        exclude={"owner@x.com", "old@x.com"},    # ...but excluded never appear
     )
-    assert rows[0] == ["thread_id"]
-    # owner ignored -> t-owner-only not emitted; keep protects t-protected
-    assert [r[0] for r in rows[1:]] == ["t-stale"]
+    assert "owner@x.com" not in result
+    assert "old@x.com" not in result
 
 
-def test_main_non_interactive_flags_skip_prompts(tmp_path):
-    agg, occ = make_pipeline_files(tmp_path)
-    out = tmp_path / "dormant_threads.csv"
+# --- main: CSV in, delete-list CSV out, args + prompts + exit codes -----------
 
-    def no_input(_prompt):
-        raise AssertionError("must not prompt when flags are given")
+def test_main_writes_delete_list_csv(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, sample_rows())
+    out = tmp_path / "filtered.csv"
 
-    main(["--aggregate", agg, "--occurrences", occ,
-          "--owner", "owner@example.com",
-          "--years", "5", "--ignore", "owner@example.com",
-          "--retain", "keep@example.com", "--out", str(out)],
-         input_fn=no_input, today=TODAY)
-    assert [r[0] for r in read_csv(str(out))[1:]] == ["t-stale"]
+    rc = main(["--in", str(inp), "--out", str(out),
+               "--ignore", "owner@x.com", "--retain", "", "--years", "5",
+               "--today", "2026-07-04"])
+
+    assert rc == 0
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert CSV_HEADER == ["email", "earliest_date", "latest_date",
+                          "thread_ids", "message_ids"]
+    assert rows[0] == CSV_HEADER
+    # cutoff 2021-07-04: old@x.com (2015) is dormant; fresh@x.com and
+    # owner@x.com were both heard from in 2026, and owner is ignored anyway.
+    assert rows[1:] == [["old@x.com", "2014-01-01", "2015-06-01", "t1", "m1|m2"]]
 
 
-def test_main_empty_aggregate_writes_header_only(tmp_path):
-    agg = tmp_path / "contacts.csv"
-    occ = tmp_path / "occurrences.csv"
-    write_aggregate(str(agg), [])
-    write_occurrences(str(occ), [])
-    out = tmp_path / "dormant_threads.csv"
-    main(["--aggregate", str(agg), "--occurrences", str(occ),
-          "--owner", "owner@example.com", "--years", "5",
-          "--ignore", "", "--retain", "", "--out", str(out)],
-         input_fn=lambda _p: "", today=TODAY)
-    assert read_csv(str(out)) == [["thread_id"]]
+def test_main_retain_keeps_address_off_the_list(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, sample_rows())
+    out = tmp_path / "filtered.csv"
+
+    main(["--in", str(inp), "--out", str(out),
+          "--ignore", "owner@x.com", "--retain", "old@x.com",
+          "--years", "5", "--today", "2026-07-04"])
+
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows == [CSV_HEADER]  # the only dormant address was retained
+
+
+def test_main_today_flag_pins_dormancy(tmp_path):
+    # the same data flips dormant/active purely on the injected today
+    inp = tmp_path / "agg.csv"
+    write_input(inp, sample_rows())
+    out = tmp_path / "filtered.csv"
+
+    main(["--in", str(inp), "--out", str(out), "--ignore", "owner@x.com",
+          "--retain", "", "--years", "5", "--today", "2020-01-01"])
+
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows == [CSV_HEADER]  # cutoff 2015-01-01: old@x.com (2015-06) not yet dormant
+
+
+def test_main_prompts_with_owner_default_when_args_absent(tmp_path, monkeypatch, capsys):
+    # empty responses accept the defaults: ignore=[owner], retain=none, N=5
+    inp = tmp_path / "agg.csv"
+    write_input(inp, sample_rows())
+    out = tmp_path / "filtered.csv"
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n\n\n"))
+
+    rc = main(["--in", str(inp), "--out", str(out), "--today", "2026-07-04"])
+
+    assert rc == 0
+    assert "owner@x.com" in capsys.readouterr().out  # default shown in prompt
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # owner ignored by default
+
+
+def test_main_args_skip_prompts(tmp_path, monkeypatch):
+    # agent story: with all args given the run never touches stdin
+    inp = tmp_path / "agg.csv"
+    write_input(inp, sample_rows())
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda *a: (_ for _ in ()).throw(AssertionError("prompted despite args")),
+    )
+
+    rc = main(["--in", str(inp), "--out", str(tmp_path / "f.csv"),
+               "--ignore", "owner@x.com", "--retain", "", "--years", "5",
+               "--today", "2026-07-04"])
+    assert rc == 0
+
+
+def test_main_missing_input_friendly_error_and_exit_2(tmp_path, capsys):
+    rc = main(["--in", str(tmp_path / "nope.csv"),
+               "--out", str(tmp_path / "f.csv"),
+               "--ignore", "", "--retain", "", "--years", "5",
+               "--today", "2026-07-04"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert str(tmp_path / "nope.csv") in err
+    assert "aggregate" in err.lower()  # points at the phase that produces it
+
+
+def test_defaults_follow_the_pipeline_contract():
+    assert DEFAULT_IN == "aggregated_results.csv"   # the aggregate's default output
+    assert DEFAULT_OUT == "filtered_results.csv"
+
+
+def test_main_writes_default_out_filename(tmp_path, monkeypatch):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, sample_rows())
+    monkeypatch.chdir(tmp_path)
+
+    rc = main(["--in", str(inp), "--ignore", "owner@x.com", "--retain", "",
+               "--years", "5", "--today", "2026-07-04"])
+    assert rc == 0
+    assert (tmp_path / "filtered_results.csv").exists()
+
+
+def test_module_never_touches_gmail():
+    # story: no Gmail access, no deletion — computing the list has no side
+    # effects, so the module must not even import the Gmail wrapper
+    assert "simplegmail" not in sys.modules
