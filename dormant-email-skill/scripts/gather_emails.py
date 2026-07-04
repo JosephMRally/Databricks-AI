@@ -13,10 +13,11 @@ The raw ``sender`` / ``recipient`` / ``cc`` / ``bcc`` values are carried as-is
 which field a value came from). ``header_date`` is the raw ``simplegmail``
 date string as-is (usually ISO-8601 with a tz offset, or the raw RFC 2822
 header when simplegmail could not parse it; empty when the message has no
-``Date`` header). ``internal_date`` is Gmail's ``internalDate`` as-is — the
+``Date`` header). ``internal_date`` is Gmail's ``internalDate`` — the
 epoch-milliseconds server receive time, present for every message — read from
-the ``Message.internal_date`` attribute, with an empty cell until the
-installed fork exposes it. Parsing and normalization belong to the next phase.
+the fork's ``Message.internalDate`` (``Optional[int]``; an ``internal_date``
+attribute is accepted too), with an empty cell when absent or None. Parsing
+and normalization belong to the next phase.
 
 The Facade hides the Gmail API behind a single ``sweep()`` call. Its core logic
 depends only on the *shape* of a ``simplegmail`` ``Message`` — ``.sender`` (a
@@ -86,6 +87,19 @@ def _label_ids(message):
     return ARRAY_DELIMITER.join(getattr(lbl, "id", None) or str(lbl) for lbl in labels)
 
 
+def _internal_date(message):
+    """Gmail's internalDate as a string of epoch milliseconds; "" when absent.
+
+    The installed fork exposes ``Message.internalDate`` (``Optional[int]``);
+    an ``internal_date`` attribute is accepted too, per the spec. ``str()`` is
+    serialization for the CSV, not a transformation of the value.
+    """
+    value = getattr(message, "internal_date", None)
+    if value is None:
+        value = getattr(message, "internalDate", None)
+    return "" if value is None else str(value)
+
+
 def _message_row(message):
     """One CSV row for a single message (emitted even with no addresses).
 
@@ -97,8 +111,7 @@ def _message_row(message):
         emails.extend(raw_values(getattr(message, field_name, None)))
     return [
         getattr(message, "date", "") or "",  # raw as-is; next phase parses
-        # raw internalDate epoch ms; empty until the fork exposes the attribute
-        getattr(message, "internal_date", "") or "",
+        _internal_date(message),
         getattr(message, "thread_id", "") or "",
         getattr(message, "id", "") or "",
         ARRAY_DELIMITER.join(emails),

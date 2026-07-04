@@ -121,6 +121,29 @@ def test_sweep_carries_internal_date_as_is(tmp_path):
     assert rows[1][1] == "1713123673715"
 
 
+def test_sweep_reads_camelcase_internalDate_int_from_installed_fork(tmp_path):
+    # the installed fork exposes Message.internalDate as Optional[int]
+    # (epoch milliseconds) — the sweep must read it and emit the digits
+    m = message("m1", "t1", "2024-04-14 12:41:13-07:00", sender="a@x.com")
+    m.internalDate = 1713123673715
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][1] == "1713123673715"
+
+
+def test_sweep_internalDate_none_yields_empty_cell(tmp_path):
+    # Optional[int]: the fork sets None when the API omits internalDate
+    m = message("m1", "t1", "2020-01-01 00:00:00+00:00", sender="a@x.com")
+    m.internalDate = None
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][1] == ""
+
+
 def test_sweep_internal_date_empty_when_fork_lacks_attribute(tmp_path):
     # the installed fork does not expose internal_date yet — the sweep must
     # emit an empty cell, not crash (story: "emit an empty cell if the
