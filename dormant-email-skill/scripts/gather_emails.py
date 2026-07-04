@@ -3,16 +3,20 @@
 Running this script once sweeps the whole mailbox and streams exactly one CSV
 row per message, 1:1 with the source:
 
-    date(raw, as-is), thread_id, message_id, emails(pipe-joined), label_ids(pipe-joined)
+    header_date(raw, as-is), internal_date(epoch ms, as-is), thread_id,
+    message_id, emails(pipe-joined), label_ids(pipe-joined)
 
 This phase is the Extract of an ELT: no transformation of any source value.
 The raw ``sender`` / ``recipient`` / ``cc`` / ``bcc`` values are carried as-is
 — no parsing, validation, normalization, or dedup — pipe-joined into
 ``emails`` in that order with empty fields omitted (position does not identify
-which field a value came from). The ``date`` cell is the raw ``simplegmail``
+which field a value came from). ``header_date`` is the raw ``simplegmail``
 date string as-is (usually ISO-8601 with a tz offset, or the raw RFC 2822
-header when simplegmail could not parse it); parsing and normalization belong
-to the next phase.
+header when simplegmail could not parse it; empty when the message has no
+``Date`` header). ``internal_date`` is Gmail's ``internalDate`` as-is — the
+epoch-milliseconds server receive time, present for every message — read from
+the ``Message.internal_date`` attribute, with an empty cell until the
+installed fork exposes it. Parsing and normalization belong to the next phase.
 
 The Facade hides the Gmail API behind a single ``sweep()`` call. Its core logic
 depends only on the *shape* of a ``simplegmail`` ``Message`` — ``.sender`` (a
@@ -44,7 +48,8 @@ import sys
 
 logger = logging.getLogger("gather_emails")
 
-CSV_HEADER = ["date", "thread_id", "message_id", "emails", "label_ids"]
+CSV_HEADER = ["header_date", "internal_date", "thread_id", "message_id",
+              "emails", "label_ids"]
 ARRAY_DELIMITER = "|"
 # simplegmail Message attributes for From / To / Cc / Bcc, in output order.
 ADDRESS_FIELDS = ("sender", "recipient", "cc", "bcc")
@@ -92,6 +97,8 @@ def _message_row(message):
         emails.extend(raw_values(getattr(message, field_name, None)))
     return [
         getattr(message, "date", "") or "",  # raw as-is; next phase parses
+        # raw internalDate epoch ms; empty until the fork exposes the attribute
+        getattr(message, "internal_date", "") or "",
         getattr(message, "thread_id", "") or "",
         getattr(message, "id", "") or "",
         ARRAY_DELIMITER.join(emails),

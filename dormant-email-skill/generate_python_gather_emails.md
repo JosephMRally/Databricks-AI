@@ -1,17 +1,18 @@
 # Generate python script
 ## Function
-Create a python script called `scripts/gather_emails.py`; do not execute! The script should be a Facade over the `simplegmail` library that hides the Gmail API behind one simple call. This script is the **Extract (E) of an ELT pipeline**: running it once does a single sweep over the whole mailbox and, for every message, records the raw From, To, Cc, and Bcc values and the raw date, all as-is — no transformations of any kind; parsing and normalization belong to later phases. The script owns the entire sweep, so the agent never pages the mailbox or holds raw messages in context.
+Create a python script called `scripts/gather_emails.py`; do not execute! The script should be a Facade over the `simplegmail` library that hides the Gmail API behind one simple call. This script is the **Extract (E) of an ELT pipeline**: running it once does a single sweep over the whole mailbox and, for every message, records the raw From, To, Cc, and Bcc values and both raw dates (the `header_date` aka Date-header-derived string and Gmail's `internalDate`), all as-is — no transformations of any kind; parsing and normalization belong to later phases. The script owns the entire sweep, so the agent never pages the mailbox or holds raw messages in context.
 
 
 ## User Stories
 Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `<actor>|<requirement>|<description>`. User stories form the basis of tests and code.
 
-<actor> | <requirement> | <description>
+actor | requirement | description
 engineer | tests to mock the `simplegmail` Gmail client | all tests are deterministic and reproducible
 engineer | test fixtures modeled on the shape of real `simplegmail` `Message` objects, using fake addresses | tests are realistic yet deterministic and touch no real account
 human | to know all email address values per message per thread | a full summary of an email thread's start and end can be understood
 engineer | this script to be the Extract (E) of an ELT pipeline: no transformation of any source value | downstream phases own all parsing, normalization, and typing
-human | dates carried as-is (the raw `simplegmail` date string) with no parsing or conversion | this phase is Extract-only; date normalization happens in a later phase
+human | both dates carried as-is with no parsing or conversion: `header_date` (the raw `simplegmail` date string, derived from the message's `Date` header) and Gmail's `internalDate` (epoch-milliseconds string, the server receive time) | this phase is Extract-only; date normalization happens in a later phase
+engineer | read Gmail's `internalDate` off each `simplegmail` `Message` (`internal_date` attribute; emit an empty cell if the installed fork does not expose it yet) | some messages have no `Date` header at all, but `internalDate` always exists — a later phase can date every message
 human | read `sender`, `recipient`, `cc`, and `bcc` off each `simplegmail` `Message` | every From/To/Cc/Bcc value is captured
 engineer | the output to be streamed to a single CSV file | the file itself could be larger than the amount of memory we have
 engineer | the output filename should default to `gathered_results.csv` (overridable via `--out` for tests and ad-hoc runs) | so that the next step knows what it needs to load
@@ -30,10 +31,11 @@ Phase 1 reads the mailbox through the `simplegmail` library, which wraps the Gma
 When running the sweep, pass `--verbose` to watch messages being processed (logging is off by default).
 
 
-## Output
+## Output Schema
 The output should be streamed to a single CSV — exactly one row per message, 1:1 with the source (a message with no addresses still yields a row with an empty `emails` cell):
 name, type, format (optional)
-`date`, str — the raw `simplegmail` date string as-is (usually ISO-8601 with tz offset, or the raw RFC 2822 header when simplegmail could not parse it); no conversion
+`header_date`, str — the raw `simplegmail` date string as-is (usually ISO-8601 with tz offset, or the raw RFC 2822 header when simplegmail could not parse it); empty when the message has no `Date` header; no conversion
+`internal_date`, str — Gmail's `internalDate` as-is (epoch-milliseconds string, server receive time); present for every message; no conversion
 `thread_id`, str
 `message_id`, str
 `emails`, array<str> (joined with `|`) — the raw `sender`, `recipient`, `cc`, `bcc` values as-is, in that order with empty fields omitted (position does not identify which field a value came from)

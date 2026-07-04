@@ -46,14 +46,21 @@ class FakeLabel:
 
 
 def message(msg_id, thread_id, date, sender="", recipient="",
-            cc=None, bcc=None, label_ids=None):
-    """A stand-in exposing the attributes gather reads off a simplegmail Message."""
-    return SimpleNamespace(
+            cc=None, bcc=None, label_ids=None, internal_date=None):
+    """A stand-in exposing the attributes gather reads off a simplegmail Message.
+
+    ``internal_date`` is only set when given — omitting it models the
+    currently installed fork, which does not expose the attribute yet.
+    """
+    ns = SimpleNamespace(
         id=msg_id, thread_id=thread_id, date=date,
         sender=sender, recipient=recipient,
         cc=list(cc or []), bcc=list(bcc or []),
         label_ids=list(label_ids or []),
     )
+    if internal_date is not None:
+        ns.internal_date = internal_date
+    return ns
 
 
 class FakeGmail:
@@ -102,6 +109,31 @@ def test_sweep_missing_date_yields_empty_cell(tmp_path):
     assert rows[1][0] == ""
 
 
+def test_sweep_carries_internal_date_as_is(tmp_path):
+    # story: internalDate is the epoch-milliseconds string, carried raw —
+    # no conversion to a datetime or a calendar day
+    m = message("m1", "t1", "2024-04-14 12:41:13-07:00", sender="a@x.com",
+                internal_date="1713123673715")
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][1] == "1713123673715"
+
+
+def test_sweep_internal_date_empty_when_fork_lacks_attribute(tmp_path):
+    # the installed fork does not expose internal_date yet — the sweep must
+    # emit an empty cell, not crash (story: "emit an empty cell if the
+    # installed fork does not expose it yet")
+    m = message("m1", "t1", "2020-01-01 00:00:00+00:00", sender="a@x.com")
+    assert not hasattr(m, "internal_date")  # fixture models today's fork
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][1] == ""
+
+
 # --- raw_values: as-is Extract, no transformations ---------------------------
 
 def test_raw_string_field_kept_whole_and_untouched():
@@ -127,7 +159,7 @@ def test_sweep_carries_list_recipient_elementwise(tmp_path):
     MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert rows[1][3] == "a@x.com|B <b@x.com>|c@x.com"
+    assert rows[1][4] == "a@x.com|B <b@x.com>|c@x.com"
 
 
 def test_raw_empty_or_none_fields_are_omitted():
@@ -152,23 +184,27 @@ def test_sweep_writes_header_and_one_row_per_message(tmp_path):
         cc=["Carol <carol@example.com>"],
         bcc=["dave@example.com"],
         label_ids=[FakeLabel("INBOX"), FakeLabel("STARRED")],
+        internal_date="1551824521000",
     )
-    out = tmp_path / "occurrences.csv"
+    out = tmp_path / "gathered_results.csv"
     n = MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
 
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
 
+    assert CSV_HEADER == ["header_date", "internal_date", "thread_id",
+                          "message_id", "emails", "label_ids"]
     assert rows[0] == CSV_HEADER
     assert n == 1
     row = rows[1]
-    assert row[0] == "2019-03-05 14:22:01+00:00"  # raw date string, as-is
-    assert row[1] == "t1"
-    assert row[2] == "m1"
+    assert row[0] == "2019-03-05 14:22:01+00:00"  # raw header_date, as-is
+    assert row[1] == "1551824521000"              # raw internalDate epoch ms, as-is
+    assert row[2] == "t1"
+    assert row[3] == "m1"
     # raw values as-is, sender/recipient/cc/bcc order, pipe-joined
-    assert row[3] == ("Alice <alice@example.com>|bob@example.com|"
+    assert row[4] == ("Alice <alice@example.com>|bob@example.com|"
                       "Carol <carol@example.com>|dave@example.com")
-    assert row[4] == "INBOX|STARRED"  # label_ids pipe-joined by id
+    assert row[5] == "INBOX|STARRED"  # label_ids pipe-joined by id
 
 
 def test_sweep_empty_mailbox_writes_header_only(tmp_path):
@@ -189,7 +225,7 @@ def test_sweep_emits_a_row_even_with_no_addresses(tmp_path):
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
     assert n == 1
-    assert rows[1] == ["garbage-date", "t2", "m2", "", ""]
+    assert rows[1] == ["garbage-date", "", "t2", "m2", "", ""]
 
 
 def test_sweep_omits_empty_fields_from_emails_join(tmp_path):
@@ -201,7 +237,7 @@ def test_sweep_omits_empty_fields_from_emails_join(tmp_path):
     MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert rows[1][3] == "a@x.com|c@x.com"
+    assert rows[1][4] == "a@x.com|c@x.com"
 
 
 def test_sweep_carries_multi_address_string_as_one_value(tmp_path):
@@ -214,7 +250,7 @@ def test_sweep_carries_multi_address_string_as_one_value(tmp_path):
     MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert rows[1][3] == "a@x.com|b@x.com, C <c@x.com>"
+    assert rows[1][4] == "a@x.com|b@x.com, C <c@x.com>"
 
 
 def test_sweep_streams_from_a_lazy_generator(tmp_path):
