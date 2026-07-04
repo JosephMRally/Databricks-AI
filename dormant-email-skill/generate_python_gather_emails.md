@@ -34,12 +34,12 @@ When running the sweep, pass `--verbose` to watch messages being processed (logg
 ## Output Schema
 The output should be streamed to a single CSV — exactly one row per message, 1:1 with the source (a message with no addresses still yields a row with an empty `emails` cell):
 name, type, format (optional)
-`header_date`, str — the raw `simplegmail` date string as-is (usually ISO-8601 with tz offset, or the raw RFC 2822 header when simplegmail could not parse it); empty when the message has no `Date` header; no conversion
-`internal_date`, str — Gmail's `internalDate` as-is (epoch-milliseconds string, server receive time); present for every message; no conversion
+`header_date`, str, ISO-8601 with tz offset or raw RFC 2822; empty when the message has no `Date` header
+`internal_date`, str, epoch milliseconds; present for every message
 `thread_id`, str
 `message_id`, str
-`emails`, array<str> (joined with `|`) — the raw `sender`, `recipient`, `cc`, `bcc` values as-is, in that order with empty fields omitted (position does not identify which field a value came from)
-`label_ids`, array<str> (joined with `|`)
+`emails`, array<str>, `|`-joined; `sender`, `recipient`, `cc`, `bcc` order with empty fields omitted (position does not identify the source field)
+`label_ids`, array<str>, `|`-joined
 
 Known limitation: `|` is technically legal inside an RFC 5322 address local part and would corrupt the `|`-join, but Gmail addresses cannot contain `|` — accepted for this tool.
 
