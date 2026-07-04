@@ -23,7 +23,9 @@ from scripts.filter_emails import (
     CSV_HEADER,
     DEFAULT_IN,
     DEFAULT_OUT,
+    DEFAULT_QUERIES_OUT,
     build_address_state,
+    format_queries,
     infer_owner,
     main,
     select_dormant,
@@ -313,6 +315,68 @@ def test_build_state_lowercases_and_merges_csv_addresses():
     assert set(state) == {"alice@x.com"}
     assert state["alice@x.com"][0] == "2018-01-01"
     assert state["alice@x.com"][2] == ["t1", "t2"]
+
+
+# --- Gmail search queries file: " OR "-joined, 30 addresses per line ----------
+
+def test_format_queries_chunks_30_addresses_per_line():
+    emails = [f"u{i}@x.com" for i in range(65)]
+    lines = format_queries(emails)
+    assert len(lines) == 3                       # 30 + 30 + 5
+    assert lines[0] == " OR ".join(emails[:30])  # each line a standalone query
+    assert lines[1] == " OR ".join(emails[30:60])
+    assert lines[2] == " OR ".join(emails[60:])
+
+
+def test_format_queries_empty_list_yields_no_lines():
+    assert format_queries([]) == []
+
+
+def test_main_writes_queries_file_alongside_the_csv(tmp_path):
+    # default: filtered_queries.txt in the same directory as the --out CSV
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "old@x.com|older@y.com", "m1"),
+    ])
+
+    rc = main(["--in", str(inp), "--out", str(tmp_path / "filtered.csv"),
+               "--ignore", "", "--retain", "", "--years", "5",
+               "--today", "2026-07-04"])
+
+    assert rc == 0
+    assert DEFAULT_QUERIES_OUT == "filtered_queries.txt"
+    text = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
+    assert text == "old@x.com OR older@y.com\n"  # delete-list order, one query
+
+
+def test_main_queries_out_flag_overrides_path(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "old@x.com", "m1"),
+    ])
+    queries = tmp_path / "custom" / "q.txt"
+    queries.parent.mkdir()
+
+    main(["--in", str(inp), "--out", str(tmp_path / "filtered.csv"),
+          "--queries-out", str(queries),
+          "--ignore", "", "--retain", "", "--years", "5",
+          "--today", "2026-07-04"])
+
+    assert queries.read_text(encoding="utf-8") == "old@x.com\n"
+    assert not (tmp_path / "filtered_queries.txt").exists()
+
+
+def test_main_queries_file_empty_when_delete_list_is_empty(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "old@x.com", "m1"),
+    ])
+
+    main(["--in", str(inp), "--out", str(tmp_path / "filtered.csv"),
+          "--ignore", "", "--retain", "old@x.com", "--years", "5",
+          "--today", "2026-07-04"])
+
+    assert (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8") == ""
 
 
 def test_main_inputs_match_case_insensitively(tmp_path):
