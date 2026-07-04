@@ -146,20 +146,6 @@ def test_aggregate_falls_back_when_header_date_unparseable():
     assert aggregate(iter(rows))["t1"][0] == "2024-04-14"
 
 
-def test_aggregate_skips_unparseable_date_rows_and_reports_stderr(capsys):
-    # skipped only when BOTH header_date and internal_date are unusable
-    rows = [
-        row("garbage-date", "t1", "m1", "a@x.com"),  # internal_date="" too
-        row("2020-01-01 00:00:00+00:00", "t1", "m2", "b@x.com"),
-    ]
-    result = aggregate(iter(rows))
-    assert result["t1"][0] == "2020-01-01"      # bad row excluded from dates
-    assert result["t1"][2] == ["b@x.com"]       # ...and from emails
-    assert result["t1"][3] == ["m2"]            # ...and from message_ids
-    err = capsys.readouterr().err
-    assert "m1" in err and "garbage-date" in err  # skipped row is reported
-
-
 def test_aggregate_streams_from_a_lazy_iterator():
     # stream-read story: rows arrive one at a time; aggregate must iterate,
     # never len()/index the input

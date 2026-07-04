@@ -14,8 +14,7 @@ raw, so this phase owns both Transforms:
   RFC 2822 header) is normalized to UTC YYYY-MM-DD before any min/max
   comparison; when it is empty or unparseable the row falls back to
   `internal_date` (Gmail's internalDate, epoch milliseconds — present for
-  every message). A row is skipped and reported on stderr only when both are
-  unusable.
+  every message), so every row always has an email date.
 - addresses: each `|`-joined `emails` value is split into elements, elements
   are split on commas, display names are stripped (Alice <a@x.com> -> a@x.com),
   lowercased, and deduped.
@@ -110,21 +109,13 @@ def aggregate(rows):
     """One streaming pass: dict keyed by thread_id.
 
     ``rows`` is an iterator of dicts with the extract's columns. Returns
-    ``{thread_id: (earliest, latest, emails, message_ids)}``. A row is skipped
-    (and reported on stderr) only when header_date AND internal_date are both
-    unusable.
+    ``{thread_id: (earliest, latest, emails, message_ids)}``. Every row is
+    dated: header_date, else internal_date (per the extract's contract,
+    internalDate exists for every message).
     """
     threads = {}
     for r in rows:
         date = _row_date(r)
-        if date is None:
-            print(
-                f"skipping row (message_id={r.get('message_id', '') or '?'}): "
-                f"unusable header_date {r.get('header_date')!r} and "
-                f"internal_date {r.get('internal_date')!r}",
-                file=sys.stderr,
-            )
-            continue
         thread_id = r.get("thread_id", "") or ""
         entry = threads.setdefault(thread_id, [date, date, [], []])
         entry[0] = min(entry[0], date)
