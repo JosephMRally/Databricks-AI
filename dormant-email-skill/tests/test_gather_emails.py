@@ -10,9 +10,13 @@ pipe-joined into the `emails` column, empty fields omitted. Dates too are
 carried as-is (the raw simplegmail date string); normalization is the next
 phase's job. Output defaults to gathered_results.csv.
 
-Reference shapes (from simplegmail source):
-- `Message.sender` / `Message.recipient` are strings (a header value, which may
-  hold several comma-separated addresses — kept as one value).
+Reference shapes:
+- `Message.sender` is a string (a header value, which may hold several
+  comma-separated addresses — kept as one value).
+- `Message.recipient` is `List[str]` per the spec (story: treat
+  `cc`/`bcc`/`recipient` as lists of strings). NOTE: the currently installed
+  fork still emits `recipient` as an unsplit string (gmail.py builds it as
+  `hdr['value']`), so the sweep must handle BOTH shapes; tests cover both.
 - `Message.cc` / `Message.bcc` are `List[str]` (header split on ", ").
 - `Message.date` is `str(dateutil.parse(header).astimezone())`, e.g.
   "2019-03-05 14:22:01-08:00".
@@ -109,9 +113,21 @@ def test_raw_string_field_kept_whole_and_untouched():
 
 
 def test_raw_list_field_kept_elementwise():
-    # cc / bcc arrive as List[str]; each element carried as-is
+    # cc / bcc / recipient arrive as List[str]; each element carried as-is
     assert raw_values(["Carol <carol@x.com>", "dave@x.com"]) == \
         ["Carol <carol@x.com>", "dave@x.com"]
+
+
+def test_sweep_carries_list_recipient_elementwise(tmp_path):
+    # story 24: recipient is a list of strings — each element becomes its own
+    # emails array element, raw
+    m = message("m1", "t1", "2020-01-01 00:00:00+00:00",
+                sender="a@x.com", recipient=["B <b@x.com>", "c@x.com"])
+    out = tmp_path / "g.csv"
+    MailboxSweepFacade(FakeGmail([m])).sweep(str(out))
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1][3] == "a@x.com|B <b@x.com>|c@x.com"
 
 
 def test_raw_empty_or_none_fields_are_omitted():
@@ -189,8 +205,9 @@ def test_sweep_omits_empty_fields_from_emails_join(tmp_path):
 
 
 def test_sweep_carries_multi_address_string_as_one_value(tmp_path):
-    # a To header holding several comma-separated addresses stays ONE array
-    # element — splitting it is the next phase's job
+    # the INSTALLED fork still emits recipient as one unsplit string; a To
+    # header holding several comma-separated addresses stays ONE array
+    # element — splitting it is the next phase's job either way
     m = message("m3", "t3", "2020-01-01T00:00:00Z",
                 sender="a@x.com", recipient="b@x.com, C <c@x.com>")
     out = tmp_path / "occurrences.csv"

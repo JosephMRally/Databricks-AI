@@ -15,9 +15,11 @@ header when simplegmail could not parse it); parsing and normalization belong
 to the next phase.
 
 The Facade hides the Gmail API behind a single ``sweep()`` call. Its core logic
-depends only on the *shape* of a ``simplegmail`` ``Message`` — ``.sender`` and
-``.recipient`` (strings), ``.cc`` / ``.bcc`` (``List[str]``), ``.date``
-(a ``str(datetime.astimezone())``), ``.id``, ``.thread_id``, and ``.label_ids``
+depends only on the *shape* of a ``simplegmail`` ``Message`` — ``.sender`` (a
+string), ``.recipient`` / ``.cc`` / ``.bcc`` (``List[str]`` per the spec; the
+installed fork still emits ``recipient`` as an unsplit string, and every
+address field is handled as either shape), ``.date`` (a
+``str(datetime.astimezone())``), ``.id``, ``.thread_id``, and ``.label_ids``
 (``Label`` objects) — so tests inject a fake client and need no credentials or
 network.
 

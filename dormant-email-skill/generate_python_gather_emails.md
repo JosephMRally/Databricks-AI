@@ -21,7 +21,7 @@ human | a clear error message and non-zero exit code when neither the saved toke
 agent | python args and exit codes are used | so that LLM harness executing the code knows the status
 engineer | pass both `~/gmail-token.json` (creds_file) and `~/client_secret.json` (client_secret_file) to the Gmail constructor; a valid saved token is reused | so that signing in isnt necessary a second time
 engineer | include a flag for logging | so that i can see messages are being processed for testing
-human | treat `sender`/`recipient` as strings and `cc`/`bcc` as lists of strings (any may be empty/None), carrying every value as-is — no parsing, validation, normalization, or dedup | the output stays 1:1 with the source and all transformations happen in later phases
+human | treat `sender` as strings and `cc`/`bcc`/`recipient` as lists of strings (any may be empty/None), carrying every value as-is — no parsing, validation, normalization, or dedup | the output stays 1:1 with the source and all transformations happen in later phases
 engineer | exactly one row per message, even when all address fields are empty | every source message is represented 1:1 in the extract
 
 ## Input
