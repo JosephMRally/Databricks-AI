@@ -342,13 +342,28 @@ def test_main_outputs_ordered_by_latest_date_desc_then_email(tmp_path):
 
 # --- Gmail search queries file: " OR "-joined, 30 addresses per line ----------
 
-def test_format_queries_chunks_30_addresses_per_line():
-    emails = [f"u{i}@x.com" for i in range(65)]
+def test_format_queries_chunks_15_addresses_per_line_by_default():
+    emails = [f"u{i}@x.com" for i in range(35)]
     lines = format_queries(emails)
-    assert len(lines) == 3                       # 30 + 30 + 5
-    assert lines[0] == " OR ".join(emails[:30])  # each line a standalone query
-    assert lines[1] == " OR ".join(emails[30:60])
-    assert lines[2] == " OR ".join(emails[60:])
+    assert len(lines) == 3                       # 15 + 15 + 5
+    assert lines[0] == " OR ".join(emails[:15])  # each line a standalone query
+    assert lines[1] == " OR ".join(emails[15:30])
+    assert lines[2] == " OR ".join(emails[30:])
+
+
+def test_main_addresses_per_line_flag_sets_chunk_size(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "a@x.com|b@x.com|c@x.com", "m1"),
+    ])
+
+    main(["--in", str(inp), "--out", str(tmp_path / "filtered.csv"),
+          "--addresses-per-line", "2",
+          "--ignore", "", "--retain", "", "--years", "5",
+          "--today", "2026-07-04"])
+
+    text = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
+    assert text == "a@x.com OR b@x.com\nc@x.com\n"
 
 
 def test_format_queries_empty_list_yields_no_lines():

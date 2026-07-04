@@ -22,8 +22,9 @@ engineer | the array columns (`thread_ids`, `message_ids`) in the output CSV to 
 engineer | test fixtures use fake addresses, and prompts are driven through CLI args or fed stdin in tests | tests are deterministic and touch no real account or terminal
 human | to enter a bare domain (e.g. wm.com) in the ignore or retain inputs, matching every address at that domain or its subdomains | so I do not have to enter every address from that domain one by one
 engineer | all email addresses and domains handled case-insensitively: every address or domain — from the input CSV or the ignore/retain inputs — is converted to lower case before any comparison | `Billing@WM.com` and `billing@wm.com` are the same sender, so matching never misses on capitalization
-human | alongside the CSV, a text file of the delete-list addresses joined by " OR ", 30 addresses per line, each line a standalone Gmail search query, defaulting to `filtered_queries.txt` (overridable via `--queries-out`) | so I can paste a line into Gmail's search UI and review many dormant senders' mail at once
+human | alongside the CSV, a text file of the delete-list addresses joined by " OR ", `addresses_per_line` addresses per line, each line a standalone Gmail search query, defaulting to `filtered_queries.txt` (overridable via `--queries-out`) | so I can paste a line into Gmail's search UI and review many dormant senders' mail at once
 human | both output files ordered by `latest_date` DESC, ties broken by `email` A→Z | the most recently seen dormant contacts — the borderline calls — are at the top, and the order is deterministic
+engineer | an `--addresses-per-line N` flag (default: 15) setting how many addresses join each Gmail query line | how long a query Gmail's search box tolerates varies, so the chunk size is adjustable without editing code
 
 
 ## Function
