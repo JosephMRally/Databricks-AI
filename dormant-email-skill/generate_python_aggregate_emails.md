@@ -4,32 +4,28 @@
 Following agile conventions, we want our user stories to be in the following format: `As a <actor> I want <requirement> so that <description>` will be written in shorthand as `<actor>|<requirement>|<description>`. User stories form the basis of tests and code.
 
 <actor>|<requirement>|<description>
+engineer | parse every raw `date` string from the extract (ISO-8601 with tz offset, or the raw RFC 2822 header) and normalize to UTC `YYYY-MM-DD` before any earliest/latest comparison; a row whose date cannot be parsed is skipped and reported on stderr | comparing mixed-format raw strings gives wrong earliest/latest — this phase owns the Transform of dates
+engineer | split each `|`-joined `emails` value into elements, split comma-separated addresses within an element, strip display names (`Alice <a@x.com>` -> `a@x.com`), lowercase, and dedup | the extract carries raw header values 1:1; this phase owns the Transform of addresses so downstream matching against user-entered addresses works
+engineer | this script to be the Load and Transform (LT) of the ELT pipeline | the extract stays raw; this phase produces the typed, normalized data downstream phases consume
+human | to know the earliest and latest date of every email thread | dormant threads can be identified in the next phase
+agent | the input contract discovered at runtime — a sub agent reads `generate_python_gather_emails.md` and returns its output schema, default output filename, array delimiters, and known limitations — never hardcoded here | this spec cannot go stale when the extract's spec changes
+engineer | stream-read the input CSV | the file could be larger than the amount of memory we have
+engineer | the input path to default to the extract's default output filename, overridable via `--in` | the pipeline runs with no args while tests point at fixtures
+engineer | aggregate with a dict/map: key=`thread_id`, value=tuple of [`earliest_date` (min function), `latest_date` (max function), `emails`, `message_ids`] | a single pass accumulates per-thread state
+engineer | the result written to a single CSV file | the next phase consumes one file
 
 
 ## Function
-Create a python script called `scripts/aggregate_emails.py` that will stream in a CSV file and aggregate the emails to track the **earliest** and **latest** date of every email address. A dict/map type would be the perfect data type to perform this logic; key=email and value=(`earliest_date`, `latest_date`). The result should be written to a single CSV file with one row per address: `email`, `earliest_date`, `latest_date`. 
-
-
-## Input
-The occurrences CSV produced by `scripts/gather_emails.py` (Phase 1 is a raw Extract):
-name, type, format (optional)
-`date`, date, `YYYY-MM-DD`
-`thread_id`, str
-`message_id`, str
-`emails`, array<str> (joined with `|`) — raw header values as-is: elements may carry display names (`Alice <alice@example.com>`), mixed case, or several comma-separated addresses in one element; this phase owns splitting and normalizing them
-`label_ids`, array<str> (joined with `|`)
+Create a python script called `scripts/aggregate_emails.py`; do not execute! It is the **Load and Transform (LT) of the ELT pipeline** — the user stories above define its behavior.
 
 
 ## Output
 name, type, format (optional)
+`thread_id`, str
 `earliest_date`, date, `YYYY-MM-DD`
 `latest_date`, date, `YYYY-MM-DD`
 `emails`, array<str>
-`thread_id`, str
-
-
-# Tests
-- confirm the schema output is as above
+`message_ids`, array<str>
 
 
 # Finally
