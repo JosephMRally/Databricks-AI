@@ -14,7 +14,11 @@ older than the cutoff (today − N years) and it is neither ignored nor
 retained. Ignore/retain entries are exact addresses or bare domains (e.g.
 ``wm.com``, covering the domain and its subdomains), and every address and
 entry is lowercased before comparison, whatever case the CSV or the user
-supplies. The ignore prompt defaults to the inferred account owner — the
+supplies. The two exclusions differ in strength: ignore is address-level
+(the owner is on every thread, so their presence protects nothing), while
+retain is thread-level — every thread a retained contact appears in is
+protected, its thread/message ids never reach the output through anyone,
+and dormancy/dates still reflect the whole history (see ``select_dormant``). The ignore prompt defaults to the inferred account owner — the
 address appearing in the most threads, since the owner is on essentially
 every thread of their own mailbox. Each prompt is skipped when the matching
 CLI arg (--ignore / --retain / --years) is given, and --today pins the clock
@@ -52,10 +56,12 @@ ADDRESSES_PER_QUERY_LINE = 15
 def build_address_state(rows):
     """One streaming pass over aggregate rows -> per-address state.
 
-    Returns ``{email: [earliest, latest, thread_ids, message_ids]}`` where
-    earliest/latest are min/max of the YYYY-MM-DD strings across every thread
-    the address appears in, and thread_ids/message_ids collect those threads'
-    ids in input order.
+    Returns ``{email: [earliest, latest, thread_ids, message_id_groups]}``
+    where earliest/latest are min/max of the YYYY-MM-DD strings across every
+    thread the address appears in, ``thread_ids`` collects those threads' ids
+    in input order, and ``message_id_groups`` holds each thread's message ids
+    as its own list, aligned with ``thread_ids`` — so retain can drop a
+    protected thread's messages without losing the other threads'.
     """
     state = {}
     for r in rows:
@@ -73,7 +79,7 @@ def build_address_state(rows):
             entry[0] = min(entry[0], earliest)
             entry[1] = max(entry[1], latest)
             entry[2].append(thread_id)
-            entry[3].extend(message_ids)
+            entry[3].append(list(message_ids))
     return state
 
 
@@ -114,23 +120,51 @@ def _excluded(email, exclude):
     )
 
 
-def select_dormant(state, cutoff, exclude):
+def select_dormant(state, cutoff, ignore, retain):
     """The delete list: state filtered to dormant, non-excluded addresses.
 
     Dormant is strict: last seen older than ``cutoff`` (a ``date``); an
-    address last seen on the cutoff day itself is kept off the list.
-    ``exclude`` holds exact addresses and/or bare domains (see ``_excluded``).
+    address last seen on the cutoff day itself is kept off the list. Both
+    ``ignore`` and ``retain`` hold exact addresses and/or bare domains (see
+    ``_excluded``), but they exclude at different levels:
 
-    The result is ordered by last seen DESC with ties broken by email A->Z,
-    so both output files (CSV and Gmail queries) inherit the order: the most
-    recently seen — borderline — contacts come first.
+    - ignore is address-level only: the address never appears as a row, but
+      threads containing it stay eligible (the owner is on every thread).
+    - retain is thread-level: the address never appears AND every thread it
+      appears in is protected — its thread/message ids vanish from all rows,
+      and an address left with no unprotected threads is dropped. Deleting a
+      dormant contact's copy of a shared thread would delete the retained
+      contact's mail too.
+
+    Dormancy and the first/last-seen dates still reflect ALL of an address's
+    threads, protected ones included: they describe the contact, not just the
+    deletable subset.
+
+    The result values are ``[earliest, latest, thread_ids, message_ids]``
+    with message ids flattened, ordered by last seen DESC with ties broken by
+    email A->Z, so both output files inherit the order: the most recently
+    seen — borderline — contacts come first.
     """
+    protected = set()
+    for email, entry in state.items():
+        if _excluded(email, retain):
+            protected.update(entry[2])
+
     result = {}
     for email, entry in state.items():
-        if _excluded(email, exclude):
+        if _excluded(email, ignore) or _excluded(email, retain):
             continue
-        if date.fromisoformat(entry[1]) < cutoff:
-            result[email] = entry
+        if date.fromisoformat(entry[1]) >= cutoff:
+            continue
+        kept = [(tid, msgs) for tid, msgs in zip(entry[2], entry[3])
+                if tid not in protected]
+        if not kept:
+            continue
+        result[email] = [
+            entry[0], entry[1],
+            [tid for tid, _ in kept],
+            [mid for _, msgs in kept for mid in msgs],
+        ]
     ordered = sorted(result.items(), key=lambda kv: kv[0])
     ordered.sort(key=lambda kv: kv[1][1], reverse=True)  # stable: email ASC kept
     return dict(ordered)
@@ -217,7 +251,7 @@ def main(argv=None):
 
     today = date.fromisoformat(args.today) if args.today else date.today()
     cutoff = years_before(today, years)
-    selected = select_dormant(state, cutoff, set(ignore) | set(retain))
+    selected = select_dormant(state, cutoff, set(ignore), set(retain))
 
     with open(args.out, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)

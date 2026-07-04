@@ -71,7 +71,9 @@ def test_build_state_aggregates_per_address_across_threads():
     assert earliest == "2018-06-01"          # min across threads
     assert latest == "2024-03-03"            # max across threads
     assert thread_ids == ["t1", "t2"]
-    assert message_ids == ["m1", "m2", "m3"]  # all messages of its threads
+    # message ids grouped per thread (aligned with thread_ids), so retain
+    # can drop a protected thread's messages without losing the others'
+    assert message_ids == [["m1", "m2"], ["m3"]]
     assert state["b@x.com"][2] == ["t1"]      # only where the address appears
 
 
@@ -110,7 +112,8 @@ def test_years_before_clamps_feb_29():
 
 def test_select_dormant_keeps_only_addresses_older_than_cutoff():
     state = build_address_state(iter(sample_rows()))
-    result = select_dormant(state, cutoff=date(2021, 1, 1), exclude=set())
+    result = select_dormant(state, cutoff=date(2021, 1, 1),
+                            ignore=set(), retain=set())
     assert "old@x.com" in result       # last seen 2015 < cutoff
     assert "fresh@x.com" not in result  # last seen 2026 >= cutoff
 
@@ -122,24 +125,70 @@ def test_select_dormant_last_seen_is_max_across_threads():
         arow("t2", "2025-01-01", "2025-06-01", "a@x.com", "m2"),
     ]
     state = build_address_state(iter(rows))
-    assert select_dormant(state, cutoff=date(2021, 1, 1), exclude=set()) == {}
+    assert select_dormant(state, cutoff=date(2021, 1, 1),
+                          ignore=set(), retain=set()) == {}
 
 
 def test_select_dormant_boundary_equal_to_cutoff_is_not_dormant():
     # "older than the cutoff" is strict
     rows = [arow("t1", "2021-01-01", "2021-01-01", "a@x.com", "m1")]
     state = build_address_state(iter(rows))
-    assert select_dormant(state, cutoff=date(2021, 1, 1), exclude=set()) == {}
+    assert select_dormant(state, cutoff=date(2021, 1, 1),
+                          ignore=set(), retain=set()) == {}
 
 
 def test_select_dormant_excludes_ignored_and_retained():
     state = build_address_state(iter(sample_rows()))
     result = select_dormant(
         state, cutoff=date(2026, 7, 1),          # everyone is old enough...
-        exclude={"owner@x.com", "old@x.com"},    # ...but excluded never appear
+        ignore={"owner@x.com"}, retain={"old@x.com"},  # ...but neither appears
     )
     assert "owner@x.com" not in result
     assert "old@x.com" not in result
+
+
+# --- retain protects whole threads; ignore does not ----------------------------
+
+def test_retain_excludes_the_entire_thread():
+    rows = [
+        arow("t1", "2010-01-01", "2012-05-05", "keep@y.com|old@x.com", "m1|m2"),
+        arow("t2", "2009-01-01", "2010-02-02", "old@x.com", "m3"),
+    ]
+    state = build_address_state(iter(rows))
+    result = select_dormant(state, cutoff=date(2021, 1, 1),
+                            ignore=set(), retain={"keep@y.com"})
+    assert "keep@y.com" not in result
+    earliest, latest, thread_ids, message_ids = result["old@x.com"]
+    assert thread_ids == ["t2"]        # t1 is protected by keep@y.com
+    assert message_ids == ["m3"]       # none of t1's messages are deletable
+    # dates still describe the whole contact, including the protected thread
+    assert (earliest, latest) == ("2009-01-01", "2012-05-05")
+
+
+def test_retain_drops_address_with_no_unprotected_threads():
+    rows = [arow("t1", "2010-01-01", "2011-01-01", "keep@y.com|old@x.com", "m1")]
+    state = build_address_state(iter(rows))
+    assert select_dormant(state, cutoff=date(2021, 1, 1),
+                          ignore=set(), retain={"keep@y.com"}) == {}
+
+
+def test_retain_domain_protects_threads_of_subdomain_addresses():
+    rows = [
+        arow("t1", "2010-01-01", "2011-01-01", "alerts@notify.wm.com|old@x.com", "m1"),
+        arow("t2", "2009-01-01", "2010-01-01", "old@x.com", "m2"),
+    ]
+    state = build_address_state(iter(rows))
+    result = select_dormant(state, cutoff=date(2021, 1, 1),
+                            ignore=set(), retain={"wm.com"})
+    assert result["old@x.com"][2] == ["t2"]
+
+
+def test_ignore_is_address_level_threads_stay_eligible():
+    # the owner is on every thread; ignoring them must not protect threads
+    state = build_address_state(iter(sample_rows()))
+    result = select_dormant(state, cutoff=date(2021, 7, 4),
+                            ignore={"owner@x.com"}, retain=set())
+    assert result["old@x.com"][2] == ["t1"]  # t1 deletable though owner is in it
 
 
 # --- main: CSV in, delete-list CSV out, args + prompts + exit codes -----------
@@ -265,7 +314,8 @@ def test_select_dormant_excludes_whole_domain_including_subdomains():
         arow("t3", "2010-01-01", "2011-03-01", "wm.com@gmail.com", "m3"),
     ]
     state = build_address_state(iter(rows))
-    result = select_dormant(state, cutoff=date(2021, 1, 1), exclude={"wm.com"})
+    result = select_dormant(state, cutoff=date(2021, 1, 1),
+                            ignore={"wm.com"}, retain=set())
     # the bare domain matches after the @ only: the exact domain and its
     # subdomains, never a local part that happens to look like it
     assert set(result) == {"wm.com@gmail.com"}
@@ -299,7 +349,9 @@ def test_main_retain_accepts_bare_domains(tmp_path):
 
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # wm.com retained
+    # retain protects the whole thread: old@x.com's only thread contains a
+    # wm.com address, so old@x.com has nothing deletable and drops off too
+    assert rows[1:] == []
 
 
 # --- case-insensitivity: everything lowercased before comparison ---------------
