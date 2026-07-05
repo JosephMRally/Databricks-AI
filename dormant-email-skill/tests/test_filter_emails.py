@@ -48,6 +48,12 @@ def write_input(path, rows):
         writer.writerows(rows)
 
 
+def write_entries(path, *entries):
+    # --ignore/--retain files: one address or bare domain per line
+    path.write_text("".join(e + "\n" for e in entries), encoding="utf-8")
+    return str(path)
+
+
 # A small mailbox: owner@x.com is on every thread (the owner); old@x.com was
 # last heard from in 2015; fresh@x.com is recent.
 def sample_rows():
@@ -198,7 +204,8 @@ def test_main_writes_delete_list_csv(tmp_path):
     out = tmp_path / "filtered.csv"
 
     rc = main(["--in", str(inp), "--out", str(out),
-               "--ignore", "owner@x.com", "--retain", "", "--years", "5",
+               "--ignore", write_entries(tmp_path / "ign.txt", "owner@x.com"),
+               "--retain", "", "--years", "5",
                "--today", "2026-07-04"])
 
     assert rc == 0
@@ -218,7 +225,8 @@ def test_main_retain_keeps_address_off_the_list(tmp_path):
     out = tmp_path / "filtered.csv"
 
     main(["--in", str(inp), "--out", str(out),
-          "--ignore", "owner@x.com", "--retain", "old@x.com",
+          "--ignore", write_entries(tmp_path / "ign.txt", "owner@x.com"),
+          "--retain", write_entries(tmp_path / "ret.txt", "old@x.com"),
           "--years", "5", "--today", "2026-07-04"])
 
     with open(out, newline="") as fh:
@@ -232,7 +240,8 @@ def test_main_today_flag_pins_dormancy(tmp_path):
     write_input(inp, sample_rows())
     out = tmp_path / "filtered.csv"
 
-    main(["--in", str(inp), "--out", str(out), "--ignore", "owner@x.com",
+    main(["--in", str(inp), "--out", str(out),
+          "--ignore", write_entries(tmp_path / "ign.txt", "owner@x.com"),
           "--retain", "", "--years", "5", "--today", "2020-01-01"])
 
     with open(out, newline="") as fh:
@@ -266,7 +275,8 @@ def test_main_args_skip_prompts(tmp_path, monkeypatch):
     )
 
     rc = main(["--in", str(inp), "--out", str(tmp_path / "f.csv"),
-               "--ignore", "owner@x.com", "--retain", "", "--years", "5",
+               "--ignore", write_entries(tmp_path / "ign.txt", "owner@x.com"),
+               "--retain", "", "--years", "5",
                "--today", "2026-07-04"])
     assert rc == 0
 
@@ -292,8 +302,9 @@ def test_main_writes_default_out_filename(tmp_path, monkeypatch):
     write_input(inp, sample_rows())
     monkeypatch.chdir(tmp_path)
 
-    rc = main(["--in", str(inp), "--ignore", "owner@x.com", "--retain", "",
-               "--years", "5", "--today", "2026-07-04"])
+    rc = main(["--in", str(inp),
+               "--ignore", write_entries(tmp_path / "ign.txt", "owner@x.com"),
+               "--retain", "", "--years", "5", "--today", "2026-07-04"])
     assert rc == 0
     assert (tmp_path / "filtered_results.csv").exists()
 
@@ -328,7 +339,8 @@ def test_main_ignore_accepts_bare_domains(tmp_path):
     ])
     out = tmp_path / "filtered.csv"
 
-    main(["--in", str(inp), "--out", str(out), "--ignore", "wm.com",
+    main(["--in", str(inp), "--out", str(out),
+          "--ignore", write_entries(tmp_path / "ign.txt", "wm.com"),
           "--retain", "", "--years", "5", "--today", "2026-07-04"])
 
     with open(out, newline="") as fh:
@@ -344,7 +356,8 @@ def test_main_retain_accepts_bare_domains(tmp_path):
     out = tmp_path / "filtered.csv"
 
     main(["--in", str(inp), "--out", str(out), "--ignore", "",
-          "--retain", "wm.com", "--years", "5", "--today", "2026-07-04"])
+          "--retain", write_entries(tmp_path / "ret.txt", "wm.com"),
+          "--years", "5", "--today", "2026-07-04"])
 
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
@@ -438,10 +451,43 @@ def test_main_queries_file_empty_when_delete_list_is_empty(tmp_path):
     ])
 
     main(["--in", str(inp), "--out", str(tmp_path / "filtered.csv"),
-          "--ignore", "", "--retain", "old@x.com", "--years", "5",
-          "--today", "2026-07-04"])
+          "--ignore", "",
+          "--retain", write_entries(tmp_path / "ret.txt", "old@x.com"),
+          "--years", "5", "--today", "2026-07-04"])
 
     assert (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8") == ""
+
+
+def test_ignore_file_reads_one_entry_per_line_skipping_blanks(tmp_path):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01",
+             "old@x.com|billing@wm.com|OWNER@Y.COM", "m1"),
+    ])
+    out = tmp_path / "filtered.csv"
+    ignore = tmp_path / "ign.txt"
+    ignore.write_text("wm.com\n\nOWNER@y.com\n", encoding="utf-8")
+
+    main(["--in", str(inp), "--out", str(out), "--ignore", str(ignore),
+          "--retain", "", "--years", "5", "--today", "2026-07-04"])
+
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # both entries applied
+
+
+def test_main_missing_ignore_file_friendly_error_and_exit_2(tmp_path, capsys):
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "old@x.com", "m1"),
+    ])
+
+    rc = main(["--in", str(inp), "--out", str(tmp_path / "f.csv"),
+               "--ignore", str(tmp_path / "nope.txt"),
+               "--retain", "", "--years", "5", "--today", "2026-07-04"])
+
+    assert rc == 2
+    assert str(tmp_path / "nope.txt") in capsys.readouterr().err
 
 
 def test_main_prompt_entries_lowercased_before_matching(tmp_path, monkeypatch):
@@ -471,7 +517,8 @@ def test_main_inputs_match_case_insensitively(tmp_path):
     ])
     out = tmp_path / "filtered.csv"
 
-    main(["--in", str(inp), "--out", str(out), "--ignore", "wm.COM",
+    main(["--in", str(inp), "--out", str(out),
+          "--ignore", write_entries(tmp_path / "ign.txt", "wm.COM"),
           "--retain", "", "--years", "5", "--today", "2026-07-04"])
 
     with open(out, newline="") as fh:

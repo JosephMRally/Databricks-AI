@@ -14,7 +14,9 @@ older than the cutoff (today − N years) and it is neither ignored nor
 retained. Ignore/retain entries are exact addresses or bare domains (e.g.
 ``wm.com``, covering the domain and its subdomains), and every address and
 entry is lowercased before comparison, whatever case the CSV or the user
-supplies. The two exclusions differ in strength: ignore is address-level
+supplies. Non-interactively they come from files (--ignore FILE /
+--retain FILE, one entry per line, blank lines skipped; an empty argument
+means no entries); the prompts accept comma-separated entries directly. The two exclusions differ in strength: ignore is address-level
 (the owner is on every thread, so their presence protects nothing), while
 retain is thread-level — every thread a retained contact appears in is
 protected, its thread/message ids never reach the output through anyone,
@@ -182,6 +184,13 @@ def _parse_addresses(text):
     return [a.strip().lower() for a in (text or "").split(",") if a.strip()]
 
 
+def _read_entries(path):
+    """An --ignore/--retain file -> its entries, one address or bare domain
+    per line, blank lines skipped, lowercased. Raises FileNotFoundError."""
+    with open(path, encoding="utf-8") as fh:
+        return [line.strip().lower() for line in fh if line.strip()]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Filter the aggregate CSV down to a per-address delete "
@@ -195,13 +204,14 @@ def main(argv=None):
                         help="output text file, one delete-list address per "
                              f"line (default: {DEFAULT_QUERIES_OUT} alongside "
                              "the CSV)")
-    parser.add_argument("--ignore", default=None,
-                        help="comma-separated addresses or bare domains to "
-                             "ignore; skips the prompt (prompt default: the "
-                             "inferred owner)")
-    parser.add_argument("--retain", default=None,
-                        help="comma-separated addresses or bare domains to "
-                             "retain; skips the prompt")
+    parser.add_argument("--ignore", default=None, metavar="FILE",
+                        help="file of addresses/bare domains to ignore, one "
+                             "per line; skips the prompt (empty string: no "
+                             "entries; prompt default: the inferred owner)")
+    parser.add_argument("--retain", default=None, metavar="FILE",
+                        help="file of addresses/bare domains to retain, one "
+                             "per line; skips the prompt (empty string: no "
+                             "entries)")
     parser.add_argument("--years", type=int, default=None,
                         help=f"dormancy cutoff in years; skips the prompt "
                              f"(default: {DEFAULT_YEARS})")
@@ -222,19 +232,26 @@ def main(argv=None):
     with open(args.in_path, newline="", encoding="utf-8") as fh:
         state = build_address_state(csv.DictReader(fh))
 
-    if args.ignore is not None:
-        ignore = _parse_addresses(args.ignore)
-    else:
-        owner = infer_owner(state)
-        resp = input(f"Addresses to ignore, comma-separated "
-                     f"[default: {owner or 'none'}]: ").strip()
-        ignore = _parse_addresses(resp) if resp else ([owner] if owner else [])
+    # --ignore/--retain are filenames (one entry per line); an empty argument
+    # means "no entries" so non-interactive runs can decline without a file.
+    try:
+        if args.ignore is not None:
+            ignore = _read_entries(args.ignore) if args.ignore else []
+        else:
+            owner = infer_owner(state)
+            resp = input(f"Addresses to ignore, comma-separated "
+                         f"[default: {owner or 'none'}]: ").strip()
+            ignore = _parse_addresses(resp) if resp else ([owner] if owner else [])
 
-    if args.retain is not None:
-        retain = _parse_addresses(args.retain)
-    else:
-        retain = _parse_addresses(
-            input("Addresses to retain, comma-separated [default: none]: "))
+        if args.retain is not None:
+            retain = _read_entries(args.retain) if args.retain else []
+        else:
+            retain = _parse_addresses(
+                input("Addresses to retain, comma-separated [default: none]: "))
+    except FileNotFoundError as exc:
+        print(f"error: ignore/retain file not found: {exc.filename}",
+              file=sys.stderr)
+        return 2
 
     if args.years is not None:
         years = args.years
