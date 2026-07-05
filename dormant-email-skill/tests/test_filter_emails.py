@@ -368,15 +368,18 @@ def test_build_state_lowercases_and_merges_csv_addresses():
     assert state["alice@x.com"][2] == ["t1", "t2"]
 
 
-# --- ordering: latest_date DESC, ties by email A->Z, in both files ------------
+# --- ordering: domain, then subdomain, then username, ascending, both files ----
 
-def test_main_outputs_ordered_by_latest_date_desc_then_email(tmp_path):
-    # input arrives in neither order; zeta and alpha tie on latest_date
+def test_main_outputs_ordered_by_domain_subdomain_then_username(tmp_path):
+    # input arrives in neither order: same-domain addresses group together
+    # (username A->Z), a domain's subdomains come right after it, and the
+    # dates play no part in the order
     inp = tmp_path / "agg.csv"
     write_input(inp, [
-        arow("t1", "2010-01-01", "2012-05-05", "zeta@x.com", "m1"),
-        arow("t2", "2010-01-01", "2015-02-02", "beta@y.com", "m2"),
-        arow("t3", "2010-01-01", "2012-05-05", "alpha@z.com", "m3"),
+        arow("t1", "2010-01-01", "2011-01-01", "c@wm.com", "m1"),
+        arow("t2", "2010-01-01", "2012-01-01", "alerts@notify.wm.com", "m2"),
+        arow("t3", "2010-01-01", "2013-01-01", "a@x.com", "m3"),
+        arow("t4", "2010-01-01", "2010-06-06", "b@wm.com", "m4"),
     ])
     out = tmp_path / "filtered.csv"
 
@@ -386,9 +389,10 @@ def test_main_outputs_ordered_by_latest_date_desc_then_email(tmp_path):
 
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert [r[0] for r in rows[1:]] == ["beta@y.com", "alpha@z.com", "zeta@x.com"]
+    expected = ["b@wm.com", "c@wm.com", "alerts@notify.wm.com", "a@x.com"]
+    assert [r[0] for r in rows[1:]] == expected
     queries = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
-    assert queries == "beta@y.com\nalpha@z.com\nzeta@x.com\n"
+    assert queries == "".join(e + "\n" for e in expected)
 
 
 # --- addresses text file: one address per line ---------------------------------

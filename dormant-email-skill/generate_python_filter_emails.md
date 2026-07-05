@@ -26,7 +26,7 @@ engineer | test fixtures use fake addresses, and prompts are driven through CLI 
 human | to enter a bare domain (e.g. wm.com) in the ignore or retain inputs, matching every address at that domain or its subdomains | so I do not have to enter every address from that domain one by one
 engineer | every email address and domain from every source — the input CSV, the ignore/retain prompts, and the CLI args — converted to lower case before any processing (state building, owner inference, matching, output) | `Billing@WM.com` and `billing@wm.com` are the same sender, so no source's capitalization can ever cause a missed match or a duplicate row
 human | alongside the CSV, a text file of the delete-list addresses, one address per line, defaulting to `filtered_queries.txt` (overridable via `--queries-out`) | a plain list is easy to copy-paste and easy for other tools to consume line by line
-human | both output files ordered by `latest_date` DESC, ties broken by `email` A→Z | the most recently seen dormant contacts — the borderline calls — are at the top, and the order is deterministic
+human | both output files ordered by domain, then subdomain, then username, all ascending — sort key: the reversed domain labels (`com`, `wm`, `notify`), then the local part | addresses from the same organization sit together, a domain's subdomains right after it, so I can review and prune sender by sender
 
 
 ## Function

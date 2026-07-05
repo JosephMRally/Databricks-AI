@@ -137,9 +137,10 @@ def select_dormant(state, cutoff, ignore, retain):
     deletable subset.
 
     The result values are ``[earliest, latest, thread_ids, message_ids]``
-    with message ids flattened, ordered by last seen DESC with ties broken by
-    email A->Z, so both output files inherit the order: the most recently
-    seen — borderline — contacts come first.
+    with message ids flattened, ordered by domain, then subdomain, then
+    username, all ascending (see ``_sort_key``), so both output files inherit
+    the order: same-organization addresses sit together, a domain's
+    subdomains right after it.
     """
     protected = set()
     for email, entry in state.items():
@@ -161,9 +162,18 @@ def select_dormant(state, cutoff, ignore, retain):
             [tid for tid, _ in kept],
             [mid for _, msgs in kept for mid in msgs],
         ]
-    ordered = sorted(result.items(), key=lambda kv: kv[0])
-    ordered.sort(key=lambda kv: kv[1][1], reverse=True)  # stable: email ASC kept
-    return dict(ordered)
+    return dict(sorted(result.items(), key=lambda kv: _sort_key(kv[0])))
+
+
+def _sort_key(email):
+    """Domain, then subdomain, then username, ascending.
+
+    The domain labels are reversed (``alerts@notify.wm.com`` -> ``("com",
+    "wm", "notify")``) so a domain sorts before its subdomains and same-
+    organization addresses group together; the local part breaks ties.
+    """
+    local, _, domain = email.rpartition("@")
+    return tuple(reversed(domain.split("."))), local
 
 
 def _parse_addresses(text):
