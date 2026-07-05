@@ -1,4 +1,5 @@
-"""TDD tests for Phase 3 filter_emails.py — the per-address delete list.
+"""TDD tests for Phase 3 filter_emails.py — the delete list, one row per
+dormant address per deletable thread.
 
 Contract (per generate_python_filter_emails.md): a single streaming sweep over the
 aggregate's per-thread CSV builds per-address state (first seen = min
@@ -165,7 +166,9 @@ def test_retain_excludes_the_entire_thread():
     assert "keep@y.com" not in result
     earliest, latest, thread_ids, message_ids = result["old@x.com"]
     assert thread_ids == ["t2"]        # t1 is protected by keep@y.com
-    assert message_ids == ["m3"]       # none of t1's messages are deletable
+    # message ids stay grouped per thread so each output row can carry a
+    # single thread_id with that thread's own message_ids
+    assert message_ids == [["m3"]]     # none of t1's messages are deletable
     # dates still describe the whole contact, including the protected thread
     assert (earliest, latest) == ("2009-01-01", "2012-05-05")
 
@@ -211,12 +214,40 @@ def test_main_writes_delete_list_csv(tmp_path):
     assert rc == 0
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert CSV_HEADER == ["email", "earliest_date", "latest_date",
-                          "thread_ids", "message_ids"]
+    assert CSV_HEADER == ["earliest_date", "latest_date",
+                          "thread_ids", "message_ids", "emails"]
     assert rows[0] == CSV_HEADER
     # cutoff 2021-07-04: old@x.com (2015) is dormant; fresh@x.com and
     # owner@x.com were both heard from in 2026, and owner is ignored anyway.
-    assert rows[1:] == [["old@x.com", "2014-01-01", "2015-06-01", "t1", "m1|m2"]]
+    assert rows[1:] == [["2014-01-01", "2015-06-01", "t1", "m1|m2", "old@x.com"]]
+
+
+def test_main_one_row_per_deletable_thread(tmp_path):
+    # story: one output row per dormant address per deletable thread — each
+    # row carries a single thread_id and that thread's message_ids, while the
+    # first/last-seen dates describe the whole contact on every row
+    inp = tmp_path / "agg.csv"
+    write_input(inp, [
+        arow("t1", "2010-01-01", "2011-01-01", "owner@x.com|old@x.com", "m1|m2"),
+        arow("t2", "2009-05-05", "2010-02-02", "owner@x.com|old@x.com", "m3"),
+        arow("t3", "2020-01-01", "2026-01-01", "owner@x.com", "m4"),
+    ])
+    out = tmp_path / "filtered.csv"
+
+    rc = main(["--in", str(inp), "--out", str(out),
+               "--ignore", write_entries(tmp_path / "ign.txt", "owner@x.com"),
+               "--retain", "", "--years", "5", "--today", "2026-07-04"])
+
+    assert rc == 0
+    with open(out, newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[1:] == [
+        ["2009-05-05", "2011-01-01", "t1", "m1|m2", "old@x.com"],
+        ["2009-05-05", "2011-01-01", "t2", "m3", "old@x.com"],
+    ]
+    # the queries file still lists the address once, not once per thread row
+    queries = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
+    assert queries == "old@x.com\n"
 
 
 def test_main_retain_keeps_address_off_the_list(tmp_path):
@@ -262,7 +293,7 @@ def test_main_prompts_with_owner_default_when_args_absent(tmp_path, monkeypatch,
     assert "owner@x.com" in capsys.readouterr().out  # default shown in prompt
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # owner ignored by default
+    assert [r[4] for r in rows[1:]] == ["old@x.com"]  # owner ignored by default
 
 
 def test_main_args_skip_prompts(tmp_path, monkeypatch):
@@ -345,7 +376,7 @@ def test_main_ignore_accepts_bare_domains(tmp_path):
 
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # all of wm.com ignored
+    assert [r[4] for r in rows[1:]] == ["old@x.com"]  # all of wm.com ignored
 
 
 def test_main_retain_accepts_bare_domains(tmp_path):
@@ -403,7 +434,7 @@ def test_main_outputs_ordered_by_domain_subdomain_then_username(tmp_path):
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
     expected = ["b@wm.com", "c@wm.com", "alerts@notify.wm.com", "a@x.com"]
-    assert [r[0] for r in rows[1:]] == expected
+    assert [r[4] for r in rows[1:]] == expected
     queries = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
     assert queries == "".join(e + "\n" for e in expected)
 
@@ -473,7 +504,7 @@ def test_ignore_file_reads_one_entry_per_line_skipping_blanks(tmp_path):
 
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert [r[0] for r in rows[1:]] == ["old@x.com"]  # both entries applied
+    assert [r[4] for r in rows[1:]] == ["old@x.com"]  # both entries applied
 
 
 def test_main_missing_ignore_file_friendly_error_and_exit_2(tmp_path, capsys):
@@ -506,7 +537,7 @@ def test_main_prompt_entries_lowercased_before_matching(tmp_path, monkeypatch):
     assert rc == 0
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert [r[0] for r in rows[1:]] == ["old@x.com"]
+    assert [r[4] for r in rows[1:]] == ["old@x.com"]
 
 
 def test_main_inputs_match_case_insensitively(tmp_path):
@@ -523,4 +554,4 @@ def test_main_inputs_match_case_insensitively(tmp_path):
 
     with open(out, newline="") as fh:
         rows = list(csv.reader(fh))
-    assert [r[0] for r in rows[1:]] == ["old@x.com"]
+    assert [r[4] for r in rows[1:]] == ["old@x.com"]

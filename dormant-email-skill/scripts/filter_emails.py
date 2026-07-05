@@ -1,4 +1,5 @@
-"""Phase 3 / Filter — turn the aggregate CSV into a per-address delete list.
+"""Phase 3 / Filter — turn the aggregate CSV into a delete list, one row per
+dormant address per deletable thread.
 
 Reads the aggregate's per-thread CSV (thread_id, earliest_date, latest_date,
 emails, message_ids — contract discovered from
@@ -32,7 +33,7 @@ overridable via --queries-out.
 
 This script reads the input CSV and writes those two files, nothing else:
 no Gmail access and no deletion. Deletion is a separate, deliberate step; the
-`message_ids` column carries everything it needs.
+`thread_ids` and `message_ids` columns carry everything it needs.
 """
 
 import argparse
@@ -41,7 +42,7 @@ import os
 import sys
 from datetime import date
 
-CSV_HEADER = ["email", "earliest_date", "latest_date", "thread_ids", "message_ids"]
+CSV_HEADER = ["earliest_date", "latest_date", "thread_ids", "message_ids", "emails"]
 ARRAY_DELIMITER = "|"
 # The pipeline contract: aggregate_emails.py writes this by default.
 DEFAULT_IN = "aggregated_results.csv"
@@ -138,11 +139,12 @@ def select_dormant(state, cutoff, ignore, retain):
     threads, protected ones included: they describe the contact, not just the
     deletable subset.
 
-    The result values are ``[earliest, latest, thread_ids, message_ids]``
-    with message ids flattened, ordered by domain, then subdomain, then
-    username, all ascending (see ``_sort_key``), so both output files inherit
-    the order: same-organization addresses sit together, a domain's
-    subdomains right after it.
+    The result values are ``[earliest, latest, thread_ids, message_id_groups]``
+    with message ids still grouped per thread (aligned with ``thread_ids``, so
+    the writer can emit one row per deletable thread), ordered by domain, then
+    subdomain, then username, all ascending (see ``_sort_key``), so both
+    output files inherit the order: same-organization addresses sit together,
+    a domain's subdomains right after it.
     """
     protected = set()
     for email, entry in state.items():
@@ -162,7 +164,7 @@ def select_dormant(state, cutoff, ignore, retain):
         result[email] = [
             entry[0], entry[1],
             [tid for tid, _ in kept],
-            [mid for _, msgs in kept for mid in msgs],
+            [msgs for _, msgs in kept],
         ]
     return dict(sorted(result.items(), key=lambda kv: _sort_key(kv[0])))
 
@@ -266,20 +268,23 @@ def main(argv=None):
     with open(args.out, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(CSV_HEADER)
-        for email, (earliest, latest, thread_ids, message_ids) in selected.items():
-            writer.writerow([
-                email, earliest, latest,
-                ARRAY_DELIMITER.join(thread_ids),
-                ARRAY_DELIMITER.join(message_ids),
-            ])
+        for email, (earliest, latest, thread_ids, groups) in selected.items():
+            # one row per deletable thread; the dates describe the whole
+            # contact, so they repeat on each of the address's rows
+            for thread_id, message_ids in zip(thread_ids, groups):
+                writer.writerow([
+                    earliest, latest, thread_id,
+                    ARRAY_DELIMITER.join(message_ids), email,
+                ])
 
     queries_out = args.queries_out or os.path.join(
         os.path.dirname(args.out) or ".", DEFAULT_QUERIES_OUT)
     with open(queries_out, "w", encoding="utf-8") as fh:
         fh.writelines(email + "\n" for email in selected)
 
-    print(f"wrote {len(selected)} address rows to {args.out} "
-          f"and the addresses, one per line, to {queries_out} "
+    row_count = sum(len(entry[2]) for entry in selected.values())
+    print(f"wrote {row_count} thread rows for {len(selected)} addresses to "
+          f"{args.out} and the addresses, one per line, to {queries_out} "
           f"(dormant before {cutoff.isoformat()})")
     return 0
 
