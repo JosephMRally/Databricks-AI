@@ -25,7 +25,6 @@ from scripts.filter_emails import (
     DEFAULT_OUT,
     DEFAULT_QUERIES_OUT,
     build_address_state,
-    format_queries,
     infer_owner,
     main,
     select_dormant,
@@ -389,38 +388,10 @@ def test_main_outputs_ordered_by_latest_date_desc_then_email(tmp_path):
         rows = list(csv.reader(fh))
     assert [r[0] for r in rows[1:]] == ["beta@y.com", "alpha@z.com", "zeta@x.com"]
     queries = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
-    assert queries == "beta@y.com OR alpha@z.com OR zeta@x.com\n"
+    assert queries == "beta@y.com\nalpha@z.com\nzeta@x.com\n"
 
 
-# --- Gmail search queries file: " OR "-joined, 30 addresses per line ----------
-
-def test_format_queries_chunks_15_addresses_per_line_by_default():
-    emails = [f"u{i}@x.com" for i in range(35)]
-    lines = format_queries(emails)
-    assert len(lines) == 3                       # 15 + 15 + 5
-    assert lines[0] == " OR ".join(emails[:15])  # each line a standalone query
-    assert lines[1] == " OR ".join(emails[15:30])
-    assert lines[2] == " OR ".join(emails[30:])
-
-
-def test_main_addresses_per_line_flag_sets_chunk_size(tmp_path):
-    inp = tmp_path / "agg.csv"
-    write_input(inp, [
-        arow("t1", "2010-01-01", "2011-01-01", "a@x.com|b@x.com|c@x.com", "m1"),
-    ])
-
-    main(["--in", str(inp), "--out", str(tmp_path / "filtered.csv"),
-          "--addresses-per-line", "2",
-          "--ignore", "", "--retain", "", "--years", "5",
-          "--today", "2026-07-04"])
-
-    text = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
-    assert text == "a@x.com OR b@x.com\nc@x.com\n"
-
-
-def test_format_queries_empty_list_yields_no_lines():
-    assert format_queries([]) == []
-
+# --- addresses text file: one address per line ---------------------------------
 
 def test_main_writes_queries_file_alongside_the_csv(tmp_path):
     # default: filtered_queries.txt in the same directory as the --out CSV
@@ -436,7 +407,7 @@ def test_main_writes_queries_file_alongside_the_csv(tmp_path):
     assert rc == 0
     assert DEFAULT_QUERIES_OUT == "filtered_queries.txt"
     text = (tmp_path / "filtered_queries.txt").read_text(encoding="utf-8")
-    assert text == "old@x.com OR older@y.com\n"  # delete-list order, one query
+    assert text == "old@x.com\nolder@y.com\n"  # one address per line, list order
 
 
 def test_main_queries_out_flag_overrides_path(tmp_path):

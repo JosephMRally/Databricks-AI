@@ -24,10 +24,9 @@ every thread of their own mailbox. Each prompt is skipped when the matching
 CLI arg (--ignore / --retain / --years) is given, and --today pins the clock
 so runs and tests are deterministic.
 
-Alongside the CSV, the delete-list addresses are also written as ready-to-paste
-Gmail search queries (" OR "-joined, --addresses-per-line per line, default 15,
-each line standalone) to `filtered_queries.txt` next to the CSV, overridable
-via --queries-out.
+Alongside the CSV, the delete-list addresses are also written as a plain
+list, one address per line, to `filtered_queries.txt` next to the CSV,
+overridable via --queries-out.
 
 This script reads the input CSV and writes those two files, nothing else:
 no Gmail access and no deletion. Deletion is a separate, deliberate step; the
@@ -48,9 +47,6 @@ DEFAULT_OUT = "filtered_results.csv"
 # Written alongside the delete-list CSV (same directory as --out).
 DEFAULT_QUERIES_OUT = "filtered_queries.txt"
 DEFAULT_YEARS = 5
-# Gmail's search box has practical length limits, so queries are chunked;
-# adjustable via --addresses-per-line.
-ADDRESSES_PER_QUERY_LINE = 15
 
 
 def build_address_state(rows):
@@ -170,16 +166,6 @@ def select_dormant(state, cutoff, ignore, retain):
     return dict(ordered)
 
 
-def format_queries(emails, per_line=ADDRESSES_PER_QUERY_LINE):
-    """Delete-list addresses -> standalone Gmail search queries.
-
-    Each returned line is ``per_line`` addresses joined by ``" OR "``, ready
-    to paste into Gmail's search UI; the last line holds the remainder.
-    """
-    return [" OR ".join(emails[i:i + per_line])
-            for i in range(0, len(emails), per_line)]
-
-
 def _parse_addresses(text):
     """Comma-separated addresses or bare domains -> stripped, lowercased,
     empties dropped."""
@@ -196,12 +182,9 @@ def main(argv=None):
     parser.add_argument("--out", default=DEFAULT_OUT,
                         help=f"output delete-list CSV (default: {DEFAULT_OUT})")
     parser.add_argument("--queries-out", default=None,
-                        help="output Gmail-search text file (default: "
-                             f"{DEFAULT_QUERIES_OUT} alongside the CSV)")
-    parser.add_argument("--addresses-per-line", type=int,
-                        default=ADDRESSES_PER_QUERY_LINE,
-                        help="addresses joined into each Gmail query line "
-                             f"(default: {ADDRESSES_PER_QUERY_LINE})")
+                        help="output text file, one delete-list address per "
+                             f"line (default: {DEFAULT_QUERIES_OUT} alongside "
+                             "the CSV)")
     parser.add_argument("--ignore", default=None,
                         help="comma-separated addresses or bare domains to "
                              "ignore; skips the prompt (prompt default: the "
@@ -265,12 +248,11 @@ def main(argv=None):
 
     queries_out = args.queries_out or os.path.join(
         os.path.dirname(args.out) or ".", DEFAULT_QUERIES_OUT)
-    lines = format_queries(list(selected), args.addresses_per_line)
     with open(queries_out, "w", encoding="utf-8") as fh:
-        fh.writelines(line + "\n" for line in lines)
+        fh.writelines(email + "\n" for email in selected)
 
     print(f"wrote {len(selected)} address rows to {args.out} "
-          f"and {len(lines)} Gmail search queries to {queries_out} "
+          f"and the addresses, one per line, to {queries_out} "
           f"(dormant before {cutoff.isoformat()})")
     return 0
 
