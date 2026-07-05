@@ -11,6 +11,7 @@ engineer | the input path to default to the filter's default output filename, ov
 engineer | the same auth conventions as `scripts/gather_emails.py`: `~/gmail-token.json` / `~/client_secret.json` passed to the Gmail constructor, overridable via `--token` / `--client-secret`, with a clear error and non-zero exit code when neither exists | a saved token is reused and auth failures are understandable
 agent | python args and exit codes are used | the LLM harness executing the code knows the status
 engineer | tests to mock the `simplegmail` Gmail client, with fixtures using fake addresses — never a live mailbox | tests are deterministic and touch no real account
+engineer | include a flag for logging, `-v`/`--verbose` (off by default) | so that i can see threads are being processed for testing
 
 
 ## Function
