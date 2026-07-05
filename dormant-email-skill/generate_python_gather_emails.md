@@ -32,7 +32,7 @@ human | treat `sender` as strings and `cc`/`bcc`/`recipient` as lists of strings
 engineer | exactly one row per message, even when all address fields are empty | every source message is represented 1:1 in the extract
 
 ## Input
-Phase 1 reads the mailbox through the `simplegmail` library, which wraps the Gmail API — there is no MCP connector involved. Authentication is Google OAuth: use the `~/client_secret.json` (an OAuth client from the Google Cloud Console) in the constructor.  The first run opens a browser to authorize and writes `~/gmail-token.json` for reuse, and IMAP must be enabled on the account. Because the first run needs a browser, provision `~/gmail-token.json` in an environment that has one — the script cannot authenticate headless on a cold start.
+Phase 1 reads the mailbox through the `simplegmail` library, which wraps the Gmail API — there is no MCP connector involved. Authentication is Google OAuth: use the `~/client_secret.json` (an OAuth client from the Google Cloud Console) in the constructor.  The first run opens a browser to authorize and writes `~/gmail-token.json` for reuse. Because the first run needs a browser, provision `~/gmail-token.json` in an environment that has one — the script cannot authenticate headless on a cold start.
 
 When running the sweep, pass `--verbose` to watch messages being processed (logging is off by default).
 

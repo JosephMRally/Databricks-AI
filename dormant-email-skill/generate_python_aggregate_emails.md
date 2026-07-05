@@ -14,6 +14,7 @@ agent | the input contract discovered at runtime — a sub agent reads `generate
 engineer | stream-read the input CSV | the file could be larger than the amount of memory we have
 engineer | the input path to default to the extract's default output filename, overridable via `--in` | the pipeline runs with no args while tests point at fixtures
 engineer | aggregate with a dict/map: key=`thread_id`, value=tuple of [`earliest_date` (min function), `latest_date` (max function), `emails`, `message_ids`] | a single pass accumulates per-thread state
+engineer | the array columns (`emails`, `message_ids`) in the output CSV to be `|`-delimited | consistent with the extract, so the next phase can split them apart
 engineer | the result written to a single CSV file, defaulting to `aggregated_results.csv` and overridable via `--out` | the next phase (filter) consumes one file and depends on that default filename
 
 
@@ -21,13 +22,13 @@ engineer | the result written to a single CSV file, defaulting to `aggregated_re
 Create a python script called `scripts/aggregate_emails.py`; do not execute! It is the **Load and Transform (LT) of the ELT pipeline** — the user stories above define its behavior.
 
 
-## Output
+## Output Schema
 name, type, format (optional)
 `thread_id`, str
 `earliest_date`, date, `YYYY-MM-DD`
 `latest_date`, date, `YYYY-MM-DD`
-`emails`, array<str>
-`message_ids`, array<str>
+`emails`, array<str>, `|`-joined; lowercase bare addresses
+`message_ids`, array<str>, `|`-joined
 
 
 # Finally
