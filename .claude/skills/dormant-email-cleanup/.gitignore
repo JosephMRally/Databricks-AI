@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.DS_Store
+*.txt
+*.csv
+*.py
+
+# Sensitive personal data — NEVER commit (email-audit outputs & contact lists)
+gathered_results.csv
+aggregated_results.csv
+filtered_results.csv
+deleted_results.csv
+filtered_queries.txt
+emails_addresses_to_ignore.txt
+emails_addresses_to_retain.txt

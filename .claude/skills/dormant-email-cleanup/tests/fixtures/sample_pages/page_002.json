@@ -1,0 +1,19 @@
+{
+  "threads": [
+    {
+      "id": "thread-ccc",
+      "messages": [
+        {
+          "id": "msg-004",
+          "date": "2015-01-01T00:00:00Z",
+          "labelIds": [],
+          "sender": "old.friend@example.org",
+          "toRecipients": ["owner@example.com"],
+          "ccRecipients": [],
+          "bccRecipients": []
+        }
+      ]
+    }
+  ],
+  "resultCountEstimate": 201
+}

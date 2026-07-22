@@ -1,0 +1,43 @@
+{
+  "threads": [
+    {
+      "id": "thread-aaa",
+      "messages": [
+        {
+          "id": "msg-001",
+          "date": "2019-03-05T14:22:01Z",
+          "labelIds": ["INBOX", "STARRED"],
+          "sender": "Alice Example <alice@example.com>",
+          "toRecipients": ["bob@example.com"],
+          "ccRecipients": ["Carol <carol@example.com>"],
+          "bccRecipients": []
+        },
+        {
+          "id": "msg-002",
+          "date": "2019-03-06T09:00:00Z",
+          "labelIds": ["INBOX"],
+          "sender": "bob@example.com",
+          "toRecipients": ["ALICE@example.com", "dave@example.com"],
+          "ccRecipients": [],
+          "bccRecipients": ["eve@example.com"]
+        }
+      ]
+    },
+    {
+      "id": "thread-bbb",
+      "messages": [
+        {
+          "id": "msg-003",
+          "date": "2024-11-30T23:59:59+00:00",
+          "labelIds": ["SENT"],
+          "sender": "owner@example.com",
+          "toRecipients": ["alice@example.com"],
+          "ccRecipients": [],
+          "bccRecipients": []
+        }
+      ]
+    }
+  ],
+  "nextPageToken": "TOKEN-2",
+  "resultCountEstimate": 201
+}
