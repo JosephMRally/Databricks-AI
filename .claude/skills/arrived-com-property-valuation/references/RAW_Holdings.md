@@ -1,6 +1,6 @@
 # RAW_Holdings
 
-**Sheet:** `RAW_Holdings` — the investor's holdings, verbatim (all product types, including sold-out and non-SFR).
+**Output (CSV):** `RAW_Holdings.csv` — the investor's holdings, verbatim (all product types, including sold-out and non-SFR). Landed as a **CSV file** (not a Google-Sheet tab); still **SCD Type 2** — the CSV holds the full append-only history with the SCD bookkeeping columns (`api-reference.md` "SCD common": read the existing CSV → diff → expire → append).
 **Source:** `GET /accounts/{bactId}/balance/offerings` → `data.offerings[]` (bearer-token auth — see `api-reference.md` Source 1).
 **`source` tag:** `arrived:balance/offerings`
 **SCD type:** **Type 2** (dimension — expire on disappearance).

@@ -2,14 +2,16 @@
 
 Shared reference behind the skill's METHOD SUMMARY: the authenticated Arrived API endpoints, the
 auth/token capture, derived-field formulas, the dividend-consistency computation, the property-page
-scrape, the SEC sourcing, and the **common SCD mechanics** used by every `RAW_*` sheet. Each raw sheet
-has its own file (`RAW_<Sheet>.md`) that states its **source, primary key, columns, SCD type, and sort
+scrape, the SEC sourcing, and the **common SCD mechanics** used by the **five Arrived-API** `RAW_*` CSVs.
+(The **four SEC forms** do **not** use SCD — they are **1:1 per filing**, `RAW_SEC_<form>/<filingDate>_<accession>.csv`,
+one immutable CSV per filing; see each `RAW_SEC_*.md` and "SEC filing extraction" below.) Each raw source
+has its own file (`RAW_<Sheet>.md`) that states its **source, grain, columns, load model, and sort
 order**; this file holds everything cross-cutting. Endpoints/fields were **verified against a live
 logged-in session** — treat as confirmed unless the app changes.
 
-Per-sheet files: `RAW_Holdings.md`, `RAW_OfferingDetails.md`, `RAW_Dividends.md`,
+Per-source files: `RAW_Holdings.md`, `RAW_OfferingDetails.md`, `RAW_Dividends.md`,
 `RAW_SharePriceHistory.md`, `RAW_PropertyHistory.md`, `RAW_SEC_1U.md`, `RAW_SEC_1K.md`,
-`RAW_SEC_253G2.md`, `RAW_SEC_1SA.md` (plus **deprecated** `RAW_SECBalanceSheet.md` / `RAW_SECDividends.md`).
+`RAW_SEC_253G2.md`, `RAW_SEC_1SA.md`. Each lands to its own `RAW_<Sheet>.csv`.
 
 ## Source 1 — Authenticated Arrived API: `https://abacus.arrivedhomes.com`
 
@@ -28,7 +30,7 @@ Portfolio, then click **POSITIONS / ACTIVITY**. The app calls e.g. `/sales?accou
 
 Key endpoints (verified):
 
-| Endpoint | Returns | Feeds sheet |
+| Endpoint | Returns | Feeds CSV |
 |---|---|---|
 | `GET /accounts/{bactId}/balance/offerings` | `data.offerings[]` — the investor's holdings | `RAW_Holdings` |
 | `GET /offerings/{cid}` | `data` — full offering record | `RAW_OfferingDetails` |
@@ -52,7 +54,7 @@ vacation rentals (`VACATION_RENTAL_IPO`), and private credit. **Open rows sort f
 closed rows group below, also `ROI ($)` desc.** The `sell` checkbox renders **only on open rows** (0-share
 rows can't be sold). A closed position can't use the per-share formulas (`currentInvestment / 0` divides by
 zero and its current cost basis is `0`), so it uses a **realized** regime keyed on `initialInvestment` (see
-the closed-position rows in Source 2). The **raw** `RAW_Holdings` sheet keeps the **full** unfiltered
+the closed-position rows in Source 2). The **raw** `RAW_Holdings` CSV keeps the **full** unfiltered
 response (all product types, open and closed).
 
 ⚠️ **Two different "change" numbers — keep separate:** property-level Arrived Valuation change =
@@ -98,7 +100,7 @@ Track-record metric: of the months a property *could* have paid, how many did it
   `the-hedgecrest`). This is what the computed tab's **Property** HYPERLINK (column C) must use, and the
   page to open for the property-page scrapes below. ⚠️ The **old** public `https://arrived.com/properties/{address-slug}`
   (built from `properties[0].slug`) is **dead** — Arrived retired those pages and they now redirect to the
-  `/app/properties` browse page (verified 2026-07). Keep landing `properties[0].slug` in the raw sheets as
+  `/app/properties` browse page (verified 2026-07). Keep landing `properties[0].slug` in the raw CSVs as
   data, but never build a live link from it.
 - **Tenant Status** (computed column **U**) comes from **`properties[0].leaseStatus`** on
   `GET /offerings/{cid}` (landed in `RAW_OfferingDetails.property_leaseStatus`) — the field the Positions
@@ -113,47 +115,23 @@ Track-record metric: of the months a property *could* have paid, how many did it
   Paused`. Each = `eventType` + `MM/DD/YYYY` + a `detail` line. Click with a real click, then read in a
   short synchronous call — long async loops freeze the renderer.
 - **SEC offering-circular link** (feeds the computed tab's **column T** only — there is **no** raw
-  filing-URL sheet): scrape `a[href*="sec.gov/Archives/edgar"]` from the Documents section. The URL is
+  filing-URL CSV): scrape `a[href*="sec.gov/Archives/edgar"]` from the Documents section. The URL is
   identical for every property sharing a `dropId` — scrape one property per distinct `dropId` and map
   `dropId → URL`, then write it into column T for that drop's properties.
 
 ## Source 4 — SEC EDGAR: `https://www.sec.gov/Archives/edgar/data/{CIK}/{accession}/{file}.htm`
 
-Public, no login. Reg A series LLCs — **no quarterly (10-Q) report**. Filing types that matter:
-- **1-A POS / offering circular** (e.g. `arrived3-1apos4.htm`) — the offering doc. Confirms the $10
-  issue price, and **deep inside (page F-1+)** carries the **UNAUDITED COMBINED PRO FORMA BALANCE
-  SHEET** per series → feeds `RAW_SEC_253G2`. The balance sheet is past WebFetch's truncation, so
-  extract it via the browser: load the `.htm`, find `PRO FORMA BALANCE SHEET` in `document.body.innerText`,
-  slice the section.
-- **Annual 1-K** (audited) / **semiannual 1-SA** (unaudited) — per-series financial reports. Kept only as
-  a **fallback source for the current mortgage** (column P): the `Loan payable, net` balance-sheet line
-  (Item 3, page F-1+, usually past WebFetch truncation). The 1-SA is a single fetchable `.htm`; the 1-K is
-  one ~14 MB `.htm` — fetch in sections. (Income statements are **no longer landed** as a raw sheet.)
-- **1-U current report** (e.g. `current_report.htm`) — event-driven; carries per-series **dividend
-  declarations** with declaration / record / payment dates → feeds `RAW_SEC_1U`.
+Public, no login. Reg A series LLCs — **no quarterly (10-Q) report**. Per-form **financial-content** raw
+CSVs (`RAW_SEC_1U`, `RAW_SEC_1K`, `RAW_SEC_253G2`, `RAW_SEC_1SA`) — source doc, columns, grain, CIKs,
+discovery, and doc resolution — are defined in their `RAW_SEC_*.md` files.
 
-Verified parent series-LLCs / CIKs (the four in scope): `1821720` = **Arrived Homes, LLC**, `1962723` =
-**Arrived Homes 3, LLC**, `2015697` = **Arrived Homes 4, LLC**, `2032732` = **Arrived Homes 5, LLC**.
-Example latest-1-SA accessions: `1821720` → `0001213900-25-092406`; `1962723` → `0001213900-25-091696`;
-`2032732` → `0001213900-25-092122`.
+**Submissions API (shared):** `GET https://data.sec.gov/submissions/CIK{paddedCik}.json` — read
+`filings.recent`'s **index-aligned parallel arrays** by the same index. If `filings.files[]` is non-empty,
+fetch those overflow pages for older filings too. ⚠️ **Parse this JSON in the browser on a `data.sec.gov`
+tab** — WebFetch mis-aligns the arrays.
 
-**Filing INDEX via the submissions API (feeds `RAW_SEC_1U` / `RAW_SEC_1K` / `RAW_SEC_253G2` /
-`RAW_SEC_1SA` — the full filing history):** `GET https://data.sec.gov/submissions/CIK{paddedCik}.json`
-(CIK zero-padded to 10 digits, e.g. `CIK0001962723`). `filings.recent` holds **index-aligned parallel
-arrays** — `form[]`, `filingDate[]`, `reportDate[]`, `accessionNumber[]`, `primaryDocument[]`,
-`primaryDocDescription[]` — read them by the **same index** so fields stay aligned. Bucket every filing
-whose **base** form (strip any `/A`) is `1-U` / `1-K` / `253G2` / `1-SA` into that form's sheet, keeping
-the exact `form` string (amendments included). Build the direct doc URL as
-`https://www.sec.gov/Archives/edgar/data/{cikNoPad}/{accessionNoDashes}/{primaryDocument}`. If
-`filings.files[]` is non-empty it lists overflow pages of **older** filings to fetch too (currently empty
-for these CIKs → `recent` is the complete history). Enumerate the CIKs to pull from the holdings' offering
-circulars, so the index covers **every parent LLC the portfolio touches**. ⚠️ **Read this JSON in the
-browser on a `data.sec.gov` tab and parse the arrays exactly — WebFetch mis-aligns and under-counts them
-(observed 54 vs the true 40 on one form).** Each sheet is SCD2 append-only, `nk = cik|filingDate|accession`
-(see `references/RAW_SEC_*.md`).
-
-**Mortgage / financing:** Initial Mortgage = API `debtAmount` (`0` = all-cash). Current Mortgage =
-arrived.com current financials, or the SEC `Loan payable, net` / `Mortgage payable` line, or an
+**Mortgage / financing (computed tab):** Initial Mortgage = API `debtAmount` (`0` = all-cash). Current
+Mortgage = arrived.com current financials, or the SEC `Loan payable, net` / `Mortgage payable` line, or an
 amortization estimate (label estimates as estimates).
 
 ## Source 5 — Valuations methodology
@@ -164,117 +142,89 @@ Help article: https://help.arrived.com/en/articles/6909386-how-do-we-calculate-a
 
 ---
 
-# SCD common mechanics (used by every `RAW_*` sheet)
+# SCD common mechanics (the five Arrived-API `RAW_*` CSVs)
 
-The raw layer lands **every value exactly as returned** — no ROI, no `rent × 12`, no currency
+This section applies to the **five Arrived-API sources** (`RAW_Holdings`, `RAW_OfferingDetails`,
+`RAW_Dividends`, `RAW_SharePriceHistory`, `RAW_PropertyHistory`). The **four SEC forms are exempt** —
+they are **1:1 per filing** (`RAW_SEC_<form>/<filingDate>_<accession>.csv`, immutable, no SCD, no bookkeeping columns;
+re-runs skip accessions already on disk). Each Arrived-API source lands to its **own CSV file**
+(`RAW_<Sheet>.csv`), not a Google-Sheet tab. The
+raw layer lands **every value exactly as returned** — no ROI, no `rent × 12`, no currency
 reformatting; the only added columns are the SCD bookkeeping columns. **Flatten** nested JSON paths
-into columns (`market.title` → `market_title`), and **force text** (leading `'`) on date-like/ratio-like
-strings so Sheets doesn't coerce them.
+into columns (`market.title` → `market_title`). Write **RFC 4180** CSV: comma-separated, a header line
+of column names, and any field containing a comma, double-quote, or newline wrapped in double-quotes
+(embedded quotes doubled). Values are stored **literally** — no leading `'` text-guard is needed (that
+was a Sheets-coercion workaround); keep date/ratio strings exactly as emitted (`YYYY-MM-DD`, etc.).
 
-**Two SCD flavours are used** (each sheet states which):
-- **SCD Type 2** (most sheets) — full row history. A changed value **expires** the old current row
-  (`valid_to`, `is_current=FALSE`) and **appends** a new version row. One `is_current=TRUE` row per key.
-- **SCD Type 3** (legacy — only the now-**deprecated** `RAW_SECDividends` used it; **no active sheet does**):
-  limited history in-row — keep the **current** value plus the **previous** in adjacent columns, with an
-  effective date. On change, shift current → previous and write the new current.
+**SCD Type 2** is used by every active source — full row history. A changed value **expires** the old
+current row (`valid_to`, `is_current=FALSE`) and **appends** a new version row. One `is_current=TRUE`
+row per key.
 
 **SCD2 bookkeeping columns** (appended after the raw columns, in this order):
 
 | Column | Meaning |
 |---|---|
-| `nk` | **natural key** (the sheet's primary key spelled out with `\|` between parts). Row identity = (`nk`, `valid_from`); no synthetic surrogate. |
-| `source` | lineage tag, constant per sheet (each `RAW_*.md` gives its value). |
+| `nk` | **natural key** (the source's primary key spelled out with `\|` between parts). Row identity = (`nk`, `valid_from`); no synthetic surrogate. |
+| `source` | lineage tag, constant per source (each `RAW_*.md` gives its value). |
 | `row_hash` | djb2 hash of the raw columns only (bookkeeping excluded). Stored as text. |
 | `loaded_at` | run timestamp (`new Date().toISOString()`), taken **once** per run and reused. |
 | `valid_from` | effective-from = the `loaded_at` that first observed this version. |
 | `valid_to` | effective-to = the `loaded_at` that superseded it; blank while current. |
 | `is_current` | `TRUE` for the live version, `FALSE` once superseded. |
 
-**SCD3 bookkeeping columns** (legacy `RAW_SECDividends` only — **deprecated**): the raw columns are split into `current_*` /
-`previous_*` pairs, plus `nk`, `source`, `effective_date` (when `current_*` took effect),
-`previous_effective_date`, `loaded_at`.
-
 `row_hash` (djb2):
 ```js
 const rowHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(16); };
-const h = rowHash(RAW_COLS.map(c => rec[c] ?? '').join('|'));   // RAW_COLS in the sheet's fixed order
+const h = rowHash(RAW_COLS.map(c => rec[c] ?? '').join('|'));   // RAW_COLS in the CSV's fixed order
 ```
 
-**Load algorithm — per sheet, every run — read → diff → expire → append → sort:**
-1. **Read** the existing tab via the Drive API (`read_file_content`). Missing → first load: create tab,
-   header row, then every fresh record as an initial version (`is_current=TRUE`, `valid_from=loaded_at`).
-2. Build `currentByKey` from `is_current=TRUE` rows: `nk → { row_hash, sheet_row_index }`.
+**Load algorithm — per CSV, every run — read → diff → expire → append → sort:**
+1. **Read** the existing `RAW_<Sheet>.csv`. Missing → first load: write the header line, then every fresh
+   record as an initial version (`is_current=TRUE`, `valid_from=loaded_at`).
+2. Parse the CSV and build `currentByKey` from `is_current=TRUE` rows: `nk → { row_hash, row_index }`.
 3. Per fresh record: **new key** → append; **unchanged `row_hash`** → no-op; **changed** → expire old
    (`valid_to=loaded_at`, `is_current=FALSE`) + append new version.
-4. **Disappeared keys:** on **dimension** sheets (`RAW_Holdings`, `RAW_OfferingDetails`)
-   expire. On **event/series/periodic** sheets (`RAW_Dividends`, `RAW_SharePriceHistory`,
-   `RAW_PropertyHistory`, `RAW_SEC_1U`, `RAW_SEC_1K`, `RAW_SEC_253G2`,
-   `RAW_SEC_1SA`) do **not** expire on absence — append-only in practice.
-5. **Write:** appends → paste at first empty row; expirations → edit `valid_to` + `is_current` in place.
-6. **Header:** on first creation, bold, wrap, freeze row 1.
-7. **Sort (final step):** sort the data rows (below the frozen header) by the sheet's **sort order**
-   (each `RAW_*.md` gives it). Re-sorting each run is safe because step 1 re-reads positions.
-   `loaded_at` / `startDate` / `postedAt` / `eventDate` are all **`YYYY-MM-DD`** (or ISO timestamps) and
-   sort correctly as text.
+4. **Disappeared keys:** on **dimension** sources (`RAW_Holdings`, `RAW_OfferingDetails`)
+   expire. On **event/series** sources (`RAW_Dividends`, `RAW_SharePriceHistory`,
+   `RAW_PropertyHistory`) do **not** expire on absence — append-only in practice. (The SEC forms are
+   not in this algorithm at all — they are 1:1 per filing, see "SEC filing extraction".)
+5. **Write:** apply the appends and the in-place `valid_to`/`is_current` edits to the parsed rows, then
+   **rewrite the whole CSV** (header line + all data rows). A CSV has no cell-level edit — regenerate the
+   file each run.
+6. **Header:** the CSV's first line is the column names (raw columns then the SCD bookkeeping columns).
+7. **Sort (final step):** before writing, sort the data rows by the source's **sort order** (each
+   `RAW_*.md` gives it). `loaded_at` / `startDate` / `postedAt` / `eventDate` are all **`YYYY-MM-DD`**
+   (or ISO timestamps) and sort correctly as text.
 
 **Idempotency:** because change detection is by `row_hash`, a re-run with no upstream change stages zero
 appends and zero expirations.
 
 ---
 
-## SEC filing extraction (Source 4 — the four `RAW_SEC_*` content sheets)
+## SEC filing extraction — shared parsing engine
 
-The `RAW_SEC_1U / 1K / 253G2 / 1SA` sheets hold the **financial-table CONTENT** of Arrived's Reg A
-filings in **tidy/long** form — one row per table cell, with **`property`** (series name) and **`value`**
-as their own fields. **Never pivot on property** (no one-column-per-series layout). Each sheet's exact
-columns are in its `RAW_SEC_<form>.md`.
+Per-form discovery, doc resolution, bulk fetch, columns, and verification live in
+`RAW_SEC_1U.md`, `RAW_SEC_1K.md`, `RAW_SEC_253G2.md`, `RAW_SEC_1SA.md`. This section covers the **shared
+HTML table engine** (1-K / 1-SA / 253G2) and the **landing path**.
 
-**1. Discover filings.** For each parent series-LLC CIK (`1821720` Arrived Homes, `1962723` Arrived
-Homes 3, `2015697` Arrived Homes 4, `2032732` Arrived Homes 5), read the **submissions API**
-`https://data.sec.gov/submissions/CIK{paddedCik}.json` → `filings.recent`, and bucket by base form
-(`1-U`, `1-K`, `253G2`, `1-SA`; include `/A`). The browse UI `https://www.sec.gov/edgar/browse/?CIK={cik}`
-is the human entry point. **Skip any `accession` (or `filingDate`) already in the target sheet** —
-incremental, full history.
+**Output model — 1:1 per filing (no SCD).** Each SEC filing is extracted to its **own** CSV,
+`RAW_SEC_<form>/<filingDate>_<accession>.csv` — never a combined per-form file. Filings are immutable, so there is
+**no SCD history and no bookkeeping columns**; each CSV holds only the tidy rows for that one filing
+(`filingDate`/`accession` — and `as_of_date` for 253G2 — are constant within the file, kept as columns so
+each CSV is self-describing and concatenable). **Incremental + fast:** before fetching a filing's `.htm`,
+check whether `RAW_SEC_<form>/<filingDate>_<accession>.csv` already exists and **skip it if so** — only new accessions
+are fetched and written. Within a file, sort by the per-form order in its `RAW_SEC_*.md`.
 
-**2. Get each filing's report `.htm`.** 1-SA / 1-U / 253G2: `primaryDocument` **is** the report `.htm`
-(e.g. `ea…-1sa_arrived.htm`, `current_report.htm`, `…_253g2.htm`) — build `…/{accNoDashes}/{primaryDocument}`.
-**1-K: `primaryDocument` is only the XBRL cover** (`xsl1-K_X01/primary_doc.xml`, `isXBRL:0`), NOT the report.
-Resolve the real doc from the accession index JSON: fetch
-`https://www.sec.gov/Archives/edgar/data/{cikInt}/{accNoDashes}/index.json` → `directory.item[]`
-(each has `name`,`size`; ignore `type` — it's just an icon label) and take the **largest `.htm`** (its name
-contains `1k`; the cover/index stubs are ~0–1.6 KB). **WebFetch truncates these multi-MB docs — use the browser
-or a raw `fetch()`** (they're static HTML; no headless browser needed).
-
-**3. Bulk same-origin fetch (fast path — no per-doc navigation).** From ONE `www.sec.gov` tab you can
-`fetch()` the submissions JSON (data.sec.gov is CORS-open) **and** every filing `.htm` (same origin) in a
-single JS pass, `DOMParser` each, and extract. Validated on 1-U: 40 docs → 2,438 rows in one call. For the
-huge 1-K/1-SA docs, fetch/parse a few at a time to avoid freezing the tab (large in-page state + long
-loops freeze the renderer).
-
-**4. Parse the tables (the coalescing engine).** SEC HTML splits each figure across cells
+**Parse the tables (order-token coalescing).** SEC HTML splits each figure across cells
 (`$` | number | `)`) and the **header row uses a different cell count than the data rows**, so
 cell-index alignment fails. Map by **ORDER**: the *Nth numeric token in a row → the Nth series*.
 Negatives from a leading `(` or a trailing `)` cell; `-`/blank → `0`; strip `$` and commas. Detect tables
 content-driven by title (`balance sheet`, `comprehensive`/`operations`, `changes in member`, `cash flow`)
 and by per-series note-schedule headers/title-rows; a page's final `Consolidated` column is the roll-up.
-1-U is trivial: the `Series | Dividend Amount per Share` table, one row per series.
 **Use `textContent`, not `innerText`, when reading cells/titles from a `DOMParser` doc** — `innerText`
 needs layout and returns empty on a detached document; `norm()` already collapses whitespace so the two are
 equivalent for token parsing. (`innerText` is only needed if you run the engine against the *live*
 `document` after navigating to the doc.)
-
-**Comparative (multi-year) statements.** Later 1-K/1-SA filings print the current period **and** a
-comparative prior period side by side (e.g. a 2025 1-K balance sheet carries both `DECEMBER 31, 2024` and
-`DECEMBER 31, 2023` series blocks). The engine tags each block with its own `period`, so **the grain must
-include `period`** — never collapse a filing to one period. 1-SA interim balance sheets legitimately print
-the current interim period (e.g. `JUNE 30, 2025`) **without** a `Consolidated` column; only the comparative
-year-end block has one. Do not treat a missing `Consolidated` column as a parse failure.
-
-**5. Land tidy.** Emit one row per (filing, statement, period, line_item, property)=value. SCD2,
-append-only, `filingDate`+`accession` in the grain (`RAW_SEC_*.md` gives each schema).
-**All date fields — `filingDate`, `reportDate`, and `period` whenever it holds a date — must be emitted as
-`YYYY-MM-DD`** (parse the printed `MONTH D, YYYY` → ISO, e.g. `DECEMBER 31, 2025` → `2025-12-31`) so the
-sheet columns land as true Date type.
 
 **Known cross-entity engine gaps (harden in the standalone extractor).** The heuristic engine was tuned on
 AH3 (`1962723`) and reconciles to the dollar there, but testing on the larger AH (`1821720`, ~249 series)
@@ -285,19 +235,8 @@ of series dropped) — classify a continuation by the presence of known series c
 (3) **entity-specific titles** vary (`OPERATIONAL EXPENSES` vs `Operating Expenses`, the misspelled `CASH &
 CASH EQUIVILENTS`, `RECENT OPERATIONAL EXPENSES` for the stub) — match schedules fuzzily. Lock it down with
 the per-`(filingDate, period)` reconciliation as a **golden test across all four CIKs**, not just AH3.
-**Drop unclassifiable rows:** a row-schedule table the engine can't name yields rows with a **blank
-`statement` AND blank `line_item`** (period polluted with stray labels like `Depreciation`). These are
-garbage (they partly duplicate named statements, partly are unlabeled interim "Recent Developments"
-figures) — **filter out every row whose `statement` is empty** before landing.
 
-**6. Verify.** Per data row, numeric-token-count == series-count (0 mismatches = clean). Cross-check
-`Consolidated == sum(series)` **grouped by `(filingDate, period)`** — every period that has a `Consolidated`
-column must tie to the dollar (±$1–2 rounding). Also confirm the **same period's figure matches across
-independent filings** (e.g. `Dec 31, 2024` P&E net = 25,742,292 appears identically in the 2025 & 2026 1-K
-and the 2025 1-SA) — strong cross-filing consistency. Confirm 0 empty `property`/`value` and 0 non-numeric
-`value`.
-
-**✅ Landing path that works: browser download → device bridge (no clipboard).** The cloud sandbox's egress
+**Landing path (browser download → device bridge — no clipboard).** The cloud sandbox's egress
 allowlist blocks `*.sec.gov`, and `device_bash`/the Mac VM have no network, so **only the connected Chrome
 extension can reach the filings.** Clipboard writes are unreliable (need Chrome frontmost + active tab) and
 multi-MB writes hang the renderer — **do not depend on clipboard.** Instead: after the in-page `fetch`+parse,
@@ -305,5 +244,6 @@ build the tidy CSV string in the page and trigger a **Blob download** (`a.downlo
 size-limited tool return) to `~/Downloads`. Then grant Downloads (`device_request_folder_access`) and pull
 it into the cloud. **The device bridge times out on ~13 MB files — `gzip` on the Mac first** (CSV compresses
 ~20:1 → a few hundred KB), `device_stage_files` the `.gz`, `gunzip` + validate in the cloud, then
-`SendUserFile` clean CSVs for the user to import (File → Import → Replace current sheet). One combined
-download split by the `form` column in the cloud avoids Chrome's multi-file prompt.
+`SendUserFile` the clean CSVs to the user — these `RAW_SEC_<form>/<filingDate>_<accession>.csv` files **are** the output.
+Write **one CSV per filing** (1:1), never a combined per-form file — this keeps each download small and lets
+a re-run skip accessions already on disk.

@@ -1,6 +1,6 @@
 # RAW_OfferingDetails
 
-**Sheet:** `RAW_OfferingDetails` — the full offering record per offering, verbatim.
+**Output (CSV):** `RAW_OfferingDetails.csv` — the full offering record per offering, verbatim. Landed as a **CSV file** (not a Google-Sheet tab); still **SCD Type 2** — the CSV holds the full append-only history with the SCD bookkeeping columns (`api-reference.md` "SCD common": read the existing CSV → diff → expire → append).
 **Source:** `GET /offerings/{cid}` → `data` (cookie/session auth usually suffices — see `api-reference.md` Source 1).
 **`source` tag:** `arrived:offerings/{cid}`
 **SCD type:** **Type 2** (dimension — expire on disappearance).

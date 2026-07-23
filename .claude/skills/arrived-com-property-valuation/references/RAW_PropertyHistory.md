@@ -1,6 +1,6 @@
 # RAW_PropertyHistory
 
-**Sheet:** `RAW_PropertyHistory` — the per-property event timeline, verbatim.
+**Output (CSV):** `RAW_PropertyHistory.csv` — the per-property event timeline, verbatim. Landed as a **CSV file** (not a Google-Sheet tab); still **SCD Type 2** — the CSV holds the full append-only history with the SCD bookkeeping columns (`api-reference.md` "SCD common": read the existing CSV → diff → expire → append).
 **Source:** scraped per property from the **"View Full Property Timeline"** modal (Performance tab) — see `api-reference.md` Source 3. **No API exists.**
 **`source` tag:** `arrived:property-timeline`
 **SCD type:** **Type 2** (event — append-only; do **not** expire on absence).

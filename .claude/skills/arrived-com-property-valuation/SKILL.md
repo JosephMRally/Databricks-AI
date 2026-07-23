@@ -21,12 +21,15 @@ Valuations help article.
 - Target spreadsheet: https://docs.google.com/spreadsheets/d/185M_8BCE86vKdoTFpIrEy87nH5QyZqH5RWs5bQyZvGc/edit — each run writes to its own month-named tab (e.g. `July 2026`)
 
 **Two layers, written every run.** (1) The **computed presentation layer** — the per-property month
-tab below. (2) A **raw landing layer** — every value retrieved from Arrived and the SEC,
-**untransformed**, written to **nine active per-source raw sheets** (five Arrived-API + four SEC-content; all **Slowly Changing Dimension (SCD)
-Type 2**; the legacy `RAW_SECBalanceSheet` / `RAW_SECDividends` are **deprecated**, folded into `RAW_SEC_253G2` / `RAW_SEC_1U`) so each source record's history is preserved. The raw layer
-never derives or reformats anything; it only adds SCD bookkeeping columns. **Each raw sheet has its own
-reference file** — `references/RAW_<Sheet>.md` (source, **primary key**, columns, SCD type, sort order)
-— and the shared auth / endpoints / SCD mechanics live in `references/api-reference.md`.
+tab below (a Google-Sheet tab, with formulas and checkboxes). (2) A **raw landing layer** — every value
+retrieved from Arrived and the SEC, **untransformed**. Two shapes: (a) **five Arrived-API sources** →
+one **SCD Type 2** CSV each (`RAW_<Sheet>.csv`, append-only history + SCD bookkeeping columns) so each
+source record's history is preserved; (b) **four SEC forms** → **one immutable CSV per filing** under a
+per-form directory (`RAW_SEC_<form>/<filingDate>_<accession>.csv`) — a strict **1:1** with each extracted filing (no
+SCD, no bookkeeping columns), because filings never change. The 1:1 SEC layout makes loads **incremental
+and fast**: a re-run skips any accession whose CSV already exists. The raw layer never derives or reformats
+anything. **Each source has its own reference file** — `references/RAW_<Sheet>.md` (source, grain, columns,
+load model, sort order) — and the shared auth / endpoints / SCD mechanics live in `references/api-reference.md`.
 
 ---
 
@@ -39,19 +42,19 @@ mortgage/financing — come from the SEC filing linked on the property page.
 
 **The full API reference — endpoints, the bearer-token/cookie auth capture, field mappings,
 derived-field formulas, the SEC sourcing, dividend consistency, and the shared SCD mechanics — lives in
-[`references/api-reference.md`](references/api-reference.md); each raw sheet's schema, primary key, and
+[`references/api-reference.md`](references/api-reference.md); each raw CSV's schema, primary key, and
 sort order live in its own `references/RAW_<Sheet>.md`. Read those before pulling any data; SKILL.md
 keeps only the orientation below.**
 
 Quick orientation (details in the reference file; column letters refer to the output layout further down):
 
-- **Which holdings count as SFR properties:** `offeringInvestmentProductType === 'SINGLE_FAMILY_RESIDENTIAL_IPO'`, **both open (`currentSharesCount > 0`) and closed / fully-exited (`currentSharesCount === 0`)** positions — these are the arrived.com Portfolio **Positions** page's **OPEN POSITIONS** and **CLOSED POSITIONS** tabs. Exclude only the SFR *Fund*, vacation rentals (`VACATION_RENTAL_IPO`), and private credit. **Open positions render on top, sorted by `ROI ($)` descending; closed positions are grouped after them, also sorted by `ROI ($)` descending** — mirroring how Arrived separates the two tabs. The **raw** `RAW_Holdings` sheet keeps the full unfiltered response (all product types) as always.
+- **Which holdings count as SFR properties:** `offeringInvestmentProductType === 'SINGLE_FAMILY_RESIDENTIAL_IPO'`, **both open (`currentSharesCount > 0`) and closed / fully-exited (`currentSharesCount === 0`)** positions — these are the arrived.com Portfolio **Positions** page's **OPEN POSITIONS** and **CLOSED POSITIONS** tabs. Exclude only the SFR *Fund*, vacation rentals (`VACATION_RENTAL_IPO`), and private credit. **Open positions render on top, sorted by `ROI ($)` descending; closed positions are grouped after them, also sorted by `ROI ($)` descending** — mirroring how Arrived separates the two tabs. The **raw** `RAW_Holdings` CSV keeps the full unfiltered response (all product types) as always.
 - **`buy` and `sell` (columns A & B) are human-entered boolean checkboxes that persist across refreshes** — your own flags at the **left of everything**. Each run reads the prior tab's values by **Property** and restores them (default `FALSE` for a newly-seen property); it never blanks your entries. **`buy` appears on every row. `sell` appears ONLY on rows whose `raw_holdings.currentSharesCount > 0` (open positions)** — a closed/exited position (0 shares) gets **no `sell` checkbox** (you can't sell what you no longer hold), so its column-B cell is left blank with no checkbox.
 - **Your cost basis (Avg Cost / Share)** = your average price paid per share = **`currentInvestment ÷ currentSharesCount`** — *not* the $10 issue price. **ROI is shown three ways** (there is **no separate `Value` column** — the total-value figure is inlined into ROI ($)): **ROI ($)** = (Total Dividends Received + Current Arrived Valuation / Share × currentSharesCount) − (Avg Cost / Share × currentSharesCount) = your **net dollar gain** (can be negative); **Dividend ROI (%)** = Total Dividends Received ÷ cost basis (**dividends-only** return); **ROI (%)** = ROI ($) ÷ cost basis (**total** return).
 - **Closed / exited positions (`currentSharesCount === 0`)** can't use the per-share formulas (they would divide by zero: `currentInvestment ÷ 0` and cost basis `= 0`). Handle them as a **realized** record instead, using **`initialInvestment`** (the original pre-sale amount) as the cost basis: **ROI ($)** = Total Dividends Received **+ `appreciation.totalRealized`** (the realized gain/loss booked at sale) — your realized net dollar result; **Dividend ROI (%)** = Total Dividends Received ÷ `initialInvestment`; **ROI (%)** = ROI ($) ÷ `initialInvestment`. Leave the **current-holding / current-operating** columns blank for a closed position — **Avg Cost / Share (R)** (0 shares), **ROI at Current Valuation (G)**, **Current Rent (M)**, **Current Expenses (N)**, **Initial/Current Mortgage (O/P)**, **Annual Cash Flow (Q)**, **Equity Raised (S)**, and **SEC Filing (T)** — since you no longer own the property; still show identity, Purchase Date, Dividend Consistency, Total Dividends, Current Arrived Valuation / Share, and Tenant Status.
 - **Current Arrived Valuation** = arrived.com's official current per-share valuation (the quarterly comparable-sales figure). It exists **only on arrived.com** — prefer the valuation source over a raw holdings field. The **SEC offering circular** is authoritative only for the **$10 issue price** (the ROI/valuation-change baseline) and the offering size.
 - **Mortgage** = the property's debt. **Initial** principal = API `debtAmount` (`0` for all-cash); **current** balance from arrived.com (or Arrived's 1-K/1-SA, or amortized from the initial loan).
-- **SEC financial CONTENT — one tidy sheet per form.** The **actual financial tables** out of every **1-U, 1-K, 253G2, and 1-SA** filed by the portfolio's Arrived parent series-LLCs are extracted into their own **SCD2, tidy/long** sheets — **`RAW_SEC_1U`** (per-series dividend/share), **`RAW_SEC_1K`** & **`RAW_SEC_1SA`** (consolidating balance sheet / comprehensive income / members' equity / cash flows + per-series note schedules), **`RAW_SEC_253G2`** (unaudited pro-forma balance sheet). Grain includes **`filingDate` + `accession`** (full history, append-only). **Tidy shape: one row per (filing, statement, period, line_item, property)=value — `property` and `value` are their own fields; never pivot on property.** Extraction method: `references/api-reference.md` → "SEC filing extraction"; per-sheet schema: `references/RAW_SEC_1U.md`, `RAW_SEC_1K.md`, `RAW_SEC_253G2.md`, `RAW_SEC_1SA.md`. There is **no quarterly (10-Q)** report (Reg A exempt); the pro-forma balance sheet lives in the 253G2 offering circular. (The computed tab's **SEC Filing (column T)** still carries the offering-circular URL scraped from the property page. The older `RAW_SECBalanceSheet` / `RAW_SECDividends` content sheets are superseded by `RAW_SEC_253G2` / `RAW_SEC_1U`.)
+- **SEC financial CONTENT — one tidy CSV per filing (1:1).** The **actual financial tables** out of every **1-U, 1-K, 253G2, and 1-SA** filed by the portfolio's Arrived parent series-LLCs are extracted, each **filing to its own CSV** — **`RAW_SEC_<form>/<filingDate>_<accession>.csv`** — **never combined**. **`RAW_SEC_1U`** (per-series dividend/share), **`RAW_SEC_1K`** & **`RAW_SEC_1SA`** (consolidating balance sheet / comprehensive income / members' equity / cash flows + per-series note schedules), **`RAW_SEC_253G2`** (per-series balance sheet). Filings are immutable, so there is **no SCD history** — a re-run **skips any accession whose CSV already exists** (incremental, fast). **Tidy shape** (per-form grain in each `RAW_SEC_*.md`): **1-K/1-SA** = one row per (statement, period, line_item, property); **253G2** = one row per (statement, line_item, property) with a constant `as_of_date`; **1-U** = one row per property (series). Always **`property` and `value` are their own fields; never pivot on property.** Extraction method: `references/api-reference.md` → "SEC filing extraction"; per-form schema: `references/RAW_SEC_1U.md`, `RAW_SEC_1K.md`, `RAW_SEC_253G2.md`, `RAW_SEC_1SA.md`. There is **no quarterly (10-Q)** report (Reg A exempt). (The computed tab's **SEC Filing (column T)** still carries the offering-circular URL scraped from the property page.)
 - **Dividend consistency** = distinct calendar months with a paid distribution in the trailing `Y = min(12, months since ipoDate)` window, written as the text `"X / Y"`. Pull the distribution history from `/offerings/{cid}/dividends` (see the reference file).
 
 ---
@@ -76,7 +79,7 @@ double-click a column-border to auto-fit) across A:U** so nothing is clipped.
 |---|---|---|
 | A | buy | **human-entered boolean** (checkbox) that **persists across refreshes**. Your own buy flag — the run reads the prior value for this **Property** and restores it (default `FALSE` for a newly-seen property); it **never blanks** your entry. Not derived from any source. |
 | B | sell | **human-entered boolean** (checkbox), **persisted across refreshes** exactly like `buy`. Not derived. **Rendered ONLY on rows whose `raw_holdings.currentSharesCount > 0` (open positions).** A closed/exited position (0 shares) gets **no checkbox** here — leave B blank and do **not** insert a checkbox on it (you can't sell what you don't hold). |
-| C | Property | formula `=HYPERLINK("https://arrived.com/app/properties/"&nameSlug, name)`. `nameSlug` = the offering **`name`** lowercased with spaces → hyphens (`The Hedgecrest` → `the-hedgecrest`, `The McGregor` → `the-mcgregor`) — this is the **live logged-in app route**. ⚠️ Do **NOT** use the old public `https://arrived.com/properties/{properties[0].slug}` (address-based) pattern — Arrived retired those pages and every one now **redirects to the `/app/properties` browse page** (verified for open, closed, and camel-cased names). Written per row as a literal. (`properties[0].slug`, the address slug, is still landed in the raw sheets; it's just no longer used to build this link.) |
+| C | Property | formula `=HYPERLINK("https://arrived.com/app/properties/"&nameSlug, name)`. `nameSlug` = the offering **`name`** lowercased with spaces → hyphens (`The Hedgecrest` → `the-hedgecrest`, `The McGregor` → `the-mcgregor`) — this is the **live logged-in app route**. ⚠️ Do **NOT** use the old public `https://arrived.com/properties/{properties[0].slug}` (address-based) pattern — Arrived retired those pages and every one now **redirects to the `/app/properties` browse page** (verified for open, closed, and camel-cased names). Written per row as a literal. (`properties[0].slug`, the address slug, is still landed in the raw CSVs; it's just no longer used to build this link.) |
 | D | Market | API `market.title` |
 | E | Purchase Date | the date **you** first began owning this property — API **`ownershipStartDate`** on the holding, rendered `YYYY-MM-DD`. **Sits immediately right of Market.** Pasted value; format as a **Date**. Do **not** confuse it with `startAt` (the *offering's* open date). |
 | F | Dividend Consistency (TTM) | text `"X / Y"` — X = distinct months in the trailing Y months with a paid distribution; Y = `min(12, whole months since ipoDate)`. Pasted computed value (not a live formula). Definition: `references/api-reference.md` (Source 2b). |
@@ -152,7 +155,7 @@ canvas-rendered and screenshots/DOM reads of cells don't work.
 ## METHOD SUMMARY
 
 Endpoint / auth / field detail is in [`references/api-reference.md`](references/api-reference.md); each
-raw sheet's schema + primary key + sort order is in its own `references/RAW_<Sheet>.md`.
+raw CSV's schema + primary key + sort order is in its own `references/RAW_<Sheet>.md`.
 
 1. Open a logged-in arrived.com tab; patch `fetch`/`XHR`, navigate to Portfolio, then click into
    **POSITIONS / ACTIVITY** so the app fires an authenticated request — capture the bearer token and
@@ -164,7 +167,7 @@ raw sheet's schema + primary key + sort order is in its own `references/RAW_<She
    ROI-% denominator), **`rentalIncome.totalDividendsPaid`** (the scalar inside the **nested** `rentalIncome`
    object → column **H**, Total Dividends Received), **`appreciation.totalRealized`** (realized gain/loss →
    the **closed**-position **ROI ($)**), and **`ownershipStartDate`** (your purchase date → column **E**,
-   right after Market). The **raw** `RAW_Holdings` sheet lands the full, unfiltered response — its
+   right after Market). The **raw** `RAW_Holdings` CSV lands the full, unfiltered response — its
    **`currentSharesCount`** feeds the open **ROI ($) / Dividend ROI (%) / ROI (%)** formulas (baked into each
    row as a literal) and gates the **`sell` checkbox** (open rows only). **Also read the prior tab's
    `buy`/`sell` by Property here** so they can be restored (persistence).
@@ -181,30 +184,30 @@ raw sheet's schema + primary key + sort order is in its own `references/RAW_<She
    leaves T blank). Read initial mortgage (column **O**) from `debtAmount`. **Per property**, read the
    **Property History** timeline into **`RAW_PropertyHistory`** (raw landing only) — it **no longer feeds
    Tenant Status** (column **U** now comes from `properties[0].leaseStatus`, step 3).
-6. **SEC filings — financial CONTENT per form, 4 tidy sheets (not a filing index).** For each parent
+6. **SEC filings — financial CONTENT per form, one tidy CSV per filing (1:1, not a filing index).** For each parent
    series-LLC CIK (`1821720` Arrived Homes, `1962723` Arrived Homes 3, `2015697` Arrived Homes 4, `2032732` Arrived Homes 5), discover
    filings via the **submissions API** `https://data.sec.gov/submissions/CIK{paddedCik}.json`, then extract
-   the **financial tables** out of each filing's report `.htm` into its own **tidy/long** sheet — **1-U →
-   `RAW_SEC_1U`** (per-series dividend/share), **1-K → `RAW_SEC_1K`** & **1-SA → `RAW_SEC_1SA`**
+   the **financial tables** out of each filing's report `.htm` into **its own CSV** — **1-U →
+   `RAW_SEC_1U/<filingDate>_<accession>.csv`** (per-series dividend/share), **1-K → `RAW_SEC_1K/<filingDate>_<accession>.csv`** & **1-SA → `RAW_SEC_1SA/<filingDate>_<accession>.csv`**
    (consolidating balance sheet / comprehensive income / members' equity / cash flows + the per-series note
-   schedules), **253G2 → `RAW_SEC_253G2`** (unaudited pro-forma balance sheet). Each is **SCD2, append-only**,
-   with **`filingDate` + `accession` in the grain**; a re-run skips accessions already present.
-   **Tidy shape (required): one row per (filing, statement, period, line_item, property)=value — `property`
+   schedules), **253G2 → `RAW_SEC_253G2/<filingDate>_<accession>.csv`** (per-series balance sheet). **Strict 1:1 (one file per filing), never combined.**
+   Filings are immutable → **no SCD history**; a re-run **skips any accession whose CSV already exists** (incremental, fast).
+   **Tidy shape (required):** per-form grain in each `RAW_SEC_*.md` — **1-K/1-SA** = one row per (statement, period, line_item, property); **253G2** = (statement, line_item, property) with a constant `as_of_date`; **1-U** = one row per property. Always **`property`
    (the series/property name) and `value` are their own fields; NEVER pivot on property (no column-per-series
    layout).** The full method — EDGAR discovery, the **bulk same-origin `fetch()`** trick (fetch the
    submissions JSON + all filing `.htm`s from one `www.sec.gov` tab, no per-doc navigation), the
    **order-token coalescing** parser (SEC splits `$`/number/`)` across cells and header vs data rows have
    different cell counts, so map the *Nth numeric token → Nth series*), the cross-checks, and the
    **ISO-date rule** (all dates `YYYY-MM-DD`), the 1-K **doc resolution via `index.json`** (its `primaryDocument` is only the XBRL cover), and the **download → device-bridge landing** for the large SEC data (gzipped CSVs, not clipboard-paste) — is in
-   `references/api-reference.md` → **"SEC filing extraction"**; each sheet's columns are in its
-   `references/RAW_SEC_<form>.md`. (This supersedes the old filing-index sheets and the separate
-   `RAW_SECBalanceSheet` / `RAW_SECDividends` content sheets, now folded into `RAW_SEC_253G2` / `RAW_SEC_1U`.)
+   `references/api-reference.md` → **"SEC filing extraction"**; each CSV's columns are in its
+   `references/RAW_SEC_<form>.md`. (This supersedes the old filing-index sheets.)
 7. Set the **current mortgage** (column **P**) — `0` for all-cash; else arrived.com's current balance /
    the SEC `Loan payable, net` / an amortization estimate (label estimates).
-8. **Land the raw sheets** — upsert all **eleven** per-source sheets **exactly per their
-   `references/RAW_<Sheet>.md`** files (source, primary key, columns, SCD type, sort order) and the shared
-   `api-reference.md` "SCD common" (read → diff → expire → append → **sort**). Values land **verbatim**;
-   an unchanged re-run writes nothing. Each sheet is kept **sorted** by its documented order (e.g.
+8. **Land the raw CSVs** — **exactly per their `references/RAW_<Sheet>.md`** files (source, grain, columns,
+   load model, sort order). The **five Arrived-API sources** are **SCD Type 2**: upsert per the shared
+   `api-reference.md` "SCD common" (read → diff → expire → append → **sort**); values land **verbatim**, an
+   unchanged re-run writes nothing. The **four SEC forms** are **1:1 per filing** (`RAW_SEC_<form>/<filingDate>_<accession>.csv`):
+   write each new filing's CSV once and **skip accessions already on disk** (no SCD, no diff). Each CSV is kept **sorted** by its documented order (e.g.
    `RAW_Holdings` by `name`, `loaded_at`; `RAW_PropertyHistory` by `property_slug`, `eventDate` — sorted
    **as a date**). Independent of the computed tab.
 9. Write the **computed** month tab — 21 columns **A–U** — into a `{MonthName} {year}` tab. **Open
@@ -228,9 +231,10 @@ raw sheet's schema + primary key + sort order is in its own `references/RAW_<She
     column **H** (Total Dividends Received) vs. `rentalIncome.totalDividendsPaid`, **Tenant Status (U) =
     Title-Cased `properties[0].leaseStatus`** (e.g. `Occupied`) — never the old `new`/`renewed`/`current`;
     **`buy` checkbox on every row and `sell` checkbox on open rows only, matching the prior tab**; header
-    frozen; **all columns A:U autosized ("Fit to Data")**; **raw sheets** — an unchanged re-run added zero
-    rows, a changed value produced one new live row + one expired old row, and each natural key has exactly
-    one `is_current = TRUE` version.
+    frozen; **all columns A:U autosized ("Fit to Data")**; **Arrived-API SCD2 CSVs** — an unchanged re-run added
+    zero rows, a changed value produced one new live row + one expired old row, and each natural key has exactly
+    one `is_current = TRUE` version; **SEC per-filing CSVs** — one file per accession under `RAW_SEC_<form>/`,
+    a re-run added no files for accessions already on disk, and each file's within-file grain is unique.
 
 ## Notes / gotchas
 
@@ -245,11 +249,11 @@ raw sheet's schema + primary key + sort order is in its own `references/RAW_<She
   largest option offered) before reading, so the whole list loads in as few pages as possible and you
   minimize pagination clicks. Applies anywhere a list is paginated — holdings/activity, dividend or
   transaction history, EDGAR filing lists, etc.
-- **SEC financial content lives in four tidy sheets** — `RAW_SEC_1K`, `RAW_SEC_1SA`, `RAW_SEC_253G2`
-  (balance sheet / statements) and `RAW_SEC_1U` (per-series distributions), all **tidy/long, SCD2**, keyed
-  by `filingDate` + `accession`. Extract across **all four parent LLCs** (`1821720`, `1962723`, `2015697`,
-  `2032732`). The legacy `RAW_SECBalanceSheet` / `RAW_SECDividends` are **deprecated** (folded into
-  `RAW_SEC_253G2` / `RAW_SEC_1U`). The offering-circular **URL** still lives only in the computed tab's
+- **SEC financial content is four forms, one CSV per filing (1:1)** — `RAW_SEC_1K`, `RAW_SEC_1SA`, `RAW_SEC_253G2`
+  (balance sheet / statements) and `RAW_SEC_1U` (per-series distributions), all **tidy/long**, each filing
+  written to `RAW_SEC_<form>/<filingDate>_<accession>.csv` (**no SCD, no bookkeeping columns** — filings are immutable, so
+  re-runs skip accessions already on disk). Extract across **all four parent LLCs** (`1821720`, `1962723`, `2015697`,
+  `2032732`). The offering-circular **URL** still lives only in the computed tab's
   **column T** (scraped from the property page). Reg A has **no quarterly (10-Q) report**. The API dividend
   history stays in `RAW_Dividends`. See each `references/RAW_SEC_*.md`.
 - **All date fields are `YYYY-MM-DD` (Date type).** Every date on every sheet — SEC `filingDate` /
